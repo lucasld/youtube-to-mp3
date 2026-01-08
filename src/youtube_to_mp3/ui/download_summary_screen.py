@@ -88,7 +88,10 @@ class DownloadSummaryScreen(Screen):
         if self.successes:
             # Open and select the first successful file
             first_success = self.successes[0]
-            await asyncio.to_thread(open_file, first_success.job.output_path)
+            if first_success.job.output_path.exists():
+                await asyncio.to_thread(open_file, first_success.job.output_path)
+            else:
+                await asyncio.to_thread(open_folder, self.output_directory)
         else:
             # No successful downloads, just open the folder
             await asyncio.to_thread(open_folder, self.output_directory)
@@ -103,13 +106,12 @@ class DownloadSummaryScreen(Screen):
 
     def _format_cover_status(self, outcome) -> str:
         """Format album cover status for display."""
-        if not outcome.job.metadata.album:
-            return " (no album cover - no album specified)"
-
         if outcome.cover_success:
             source = outcome.cover_source or "unknown"
             confidence = outcome.cover_confidence or "unknown"
             return f" (album cover: {source} - {confidence})"
+        if not outcome.job.metadata.album:
+            return " (no album cover - no album specified)"
         else:
             return " (no album cover found)"
 

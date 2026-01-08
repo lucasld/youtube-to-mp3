@@ -41,6 +41,7 @@ def test_metadata_formatter_duration():
 def test_url_validator_classifies_urls():
     video_url = "https://youtu.be/dQw4w9WgXcQ"
     playlist_url = "https://www.youtube.com/playlist?list=PL12345"
+    mobile_url = "https://m.youtube.com/watch?v=dQw4w9WgXcQ"
     invalid_url = "https://example.com/video"
 
     assert URLValidator.is_valid_youtube_url(video_url)
@@ -48,6 +49,9 @@ def test_url_validator_classifies_urls():
 
     assert URLValidator.is_valid_youtube_url(playlist_url)
     assert URLValidator.classify_url(playlist_url)[0] == "playlist"
+
+    assert URLValidator.is_valid_youtube_url(mobile_url)
+    assert URLValidator.classify_url(mobile_url)[0] == "video"
 
     assert not URLValidator.is_valid_youtube_url(invalid_url)
     assert URLValidator.classify_url(invalid_url)[0] == "invalid"

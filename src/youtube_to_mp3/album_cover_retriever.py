@@ -84,25 +84,32 @@ class AlbumCoverRetriever:
 
     def retrieve_cover(self, metadata: TrackMetadata) -> CoverResult:
         """
-        Retrieve album cover using MusicBrainz primary, iTunes fallback.
+        Retrieve album cover using YouTube source (if available), 
+        otherwise MusicBrainz primary, iTunes fallback.
 
         Returns CoverResult with cover_url and optionally downloaded cover_data.
         """
-        # Must have album name to retrieve cover
-        if not metadata.album:
-            return CoverResult(
-                success=False,
-                error="No album name provided",
-                album_match_confidence="none"
-            )
+        # Strategy 0: YouTube "Golden Truth" cover (highest priority)
+        if hasattr(metadata, "youtube_album_cover_url") and metadata.youtube_album_cover_url:
+            cover_data = self._download_cover_data(metadata.youtube_album_cover_url)
+            if cover_data:
+                return CoverResult(
+                    success=True,
+                    cover_url=metadata.youtube_album_cover_url,
+                    cover_data=cover_data,
+                    source="youtube",
+                    album_match_confidence="exact"
+                )
 
-        # Must have artist name for meaningful search
         if not metadata.artist:
             return CoverResult(
                 success=False,
                 error="No artist name provided",
                 album_match_confidence="none"
             )
+
+        if not metadata.album:
+            return self._retrieve_cover_without_album(metadata)
 
         try:
             # Try MusicBrainz first (primary)
@@ -149,6 +156,53 @@ class AlbumCoverRetriever:
                 album_match_confidence="error"
             )
 
+    def _retrieve_cover_without_album(self, metadata: TrackMetadata) -> CoverResult:
+        """Try to retrieve cover art for singles using track metadata only."""
+        if not metadata.title:
+            return CoverResult(
+                success=False,
+                error="No track title provided",
+                album_match_confidence="none"
+            )
+
+        try:
+            mb_result = self.musicbrainz.retrieve_cover_for_recording(metadata)
+            if mb_result.success and mb_result.cover_url:
+                cover_data = self._download_cover_data(mb_result.cover_url)
+                if cover_data:
+                    return CoverResult(
+                        success=True,
+                        cover_url=mb_result.cover_url,
+                        cover_data=cover_data,
+                        release_info=mb_result.release_info,
+                        source="musicbrainz",
+                        album_match_confidence=mb_result.album_match_confidence
+                    )
+
+            itunes_result = self.itunes.retrieve_cover_for_track(metadata)
+            if itunes_result.success and itunes_result.cover_url:
+                cover_data = self._download_cover_data(itunes_result.cover_url)
+                if cover_data:
+                    return CoverResult(
+                        success=True,
+                        cover_url=itunes_result.cover_url,
+                        cover_data=cover_data,
+                        release_info=itunes_result.release_info,
+                        source="itunes",
+                        album_match_confidence=itunes_result.album_match_confidence
+                    )
+
+            return CoverResult(
+                success=False,
+                error="No cover found for track-only search",
+                album_match_confidence="none"
+            )
+        except Exception as e:
+            return CoverResult(
+                success=False,
+                error=f"Unexpected error during track-only cover retrieval: {str(e)}",
+                album_match_confidence="error"
+            )
     def _download_cover_data(self, url: str) -> Optional[bytes]:
         """Download cover image data."""
         try:
@@ -164,8 +218,15 @@ class AlbumCoverRetriever:
             content_length = response.headers.get('content-length')
             if content_length and int(content_length) > MAX_COVER_FILE_SIZE:
                 return None
+            data = bytearray()
+            for chunk in response.iter_content(chunk_size=8192):
+                if not chunk:
+                    continue
+                data.extend(chunk)
+                if len(data) > MAX_COVER_FILE_SIZE:
+                    return None
 
-            return response.content
+            return bytes(data)
         except requests.exceptions.Timeout:
             return None
         except requests.exceptions.ConnectionError:
@@ -214,6 +275,15 @@ class MusicBrainzRetriever:
         except Exception as e:
             return CoverResult(success=False, error=f"MusicBrainz error: {str(e)}")
 
+    def retrieve_cover_for_recording(self, metadata: TrackMetadata) -> CoverResult:
+        """Retrieve cover using recording search when no album is available."""
+        try:
+            result = self._search_recording(metadata)
+            if result.success:
+                return result
+            return CoverResult(success=False, error="No cover found via recording search")
+        except Exception as e:
+            return CoverResult(success=False, error=f"MusicBrainz error: {str(e)}")
     def _search_album_direct(self, metadata: TrackMetadata) -> CoverResult:
         """Direct album search with validation."""
         if not metadata.album:
@@ -366,6 +436,29 @@ class ITunesRetriever:
         except Exception as e:
             return CoverResult(success=False, error=f"iTunes error: {str(e)}")
 
+    def retrieve_cover_for_track(self, metadata: TrackMetadata) -> CoverResult:
+        """Retrieve cover for a single track without album metadata."""
+        try:
+            if not metadata.title:
+                return CoverResult(success=False)
+
+            tracks = self._search_tracks(metadata.artist, metadata.title)
+            if not tracks:
+                return CoverResult(success=False)
+
+            track = tracks[0]
+            return CoverResult(
+                success=True,
+                cover_url=self._get_best_cover_url(track),
+                release_info={
+                    'title': track.get('trackName', ''),
+                    'artist': track.get('artistName', ''),
+                    'year': track.get('releaseDate', '')[:4] if track.get('releaseDate') else None
+                },
+                album_match_confidence="track_only"
+            )
+        except Exception:
+            return CoverResult(success=False)
     def _search_album_direct(self, metadata: TrackMetadata) -> CoverResult:
         """Direct album search with validation."""
         if not metadata.album:
@@ -459,6 +552,23 @@ class ITunesRetriever:
         except Exception:
             return []
 
+    def _search_tracks(self, artist: str, title: str) -> List[Dict]:
+        """Search for tracks on iTunes."""
+        term = f"{artist} {title}".strip()
+        params = {
+            'term': term,
+            'entity': 'song',
+            'limit': DEFAULT_SEARCH_LIMIT,
+            'country': 'us'
+        }
+
+        try:
+            response = self.session.get(self.BASE_URL, params=params)
+            response.raise_for_status()
+            data = response.json()
+            return data.get('results', [])
+        except Exception:
+            return []
     def _get_best_cover_url(self, album: Dict) -> str:
         """Get the best cover URL from album data."""
         # iTunes provides small images by default, try to get larger versions

@@ -29,7 +29,6 @@ class AppConfig:
     output_directory: Path = field(
         default_factory=lambda: get_music_directory() / "YouTube"
     )
-    audio_format: str = "mp3"
     audio_quality: str = "192"
     rate_limit_delay: float = 1.5
     auto_confirm_correct_metadata: bool = False
@@ -44,7 +43,6 @@ class AppConfig:
         if "output_directory" in data and data["output_directory"]:
             config.output_directory = Path(data["output_directory"]).expanduser()
 
-        config.audio_format = data.get("audio_format", config.audio_format)
         config.audio_quality = data.get("audio_quality", config.audio_quality)
         config.rate_limit_delay = float(
             data.get("rate_limit_delay", config.rate_limit_delay)

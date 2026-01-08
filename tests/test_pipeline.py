@@ -76,7 +76,7 @@ def test_pipeline_downloads_tracks(tmp_path: Path):
 
     assert len(outcomes) == 1
     assert outcomes[0].success
-    assert progress_events == [(1, "pending"), (1, "completed")]
+    assert progress_events == [(1, "in_progress"), (1, "completed")]
 
 
 def test_pipeline_validates_missing_source_url(tmp_path: Path):

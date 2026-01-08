@@ -31,6 +31,7 @@ dependencies = [
     "mutagen>=1.45.0",
     "textual>=0.50.0",
     "click>=8.0.0",
+    "requests>=2.25.0",
     "pathlib2>=2.3.0; python_version < '3.4'",
 ]
 

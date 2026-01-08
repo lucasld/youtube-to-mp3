@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import json
+import requests
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
@@ -24,6 +26,7 @@ class TrackMetadata:
     source_url: Optional[str] = None
     selected: bool = True
     thumbnail_url: Optional[str] = None
+    youtube_album_cover_url: Optional[str] = None
     original_title: Optional[str] = None
     extra: Dict[str, Any] = field(default_factory=dict)
 
@@ -70,6 +73,83 @@ class YouTubeExtractor:
             # Fallback: try to extract basic info from URL patterns
             return self._fallback_metadata_extraction(url, str(e))
 
+    def _get_structured_metadata(self, url: str) -> Optional[Dict[str, str]]:
+        """
+        Extract "Golden Truth" music metadata from YouTube's ytInitialData.
+        This captures the "Music in this video" section.
+        """
+        try:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
+            }
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code != 200:
+                return None
+
+            html = response.text
+            match = re.search(r"var ytInitialData = ({.*?});", html)
+            if not match:
+                return None
+
+            data = json.loads(match.group(1))
+            
+            # Find the structured description engagement panel
+            panels = data.get("engagementPanels", [])
+            structured_panel = None
+            for p in panels:
+                if p.get("engagementPanelSectionListRenderer", {}).get("panelIdentifier") == "engagement-panel-structured-description":
+                    structured_panel = p
+                    break
+            
+            if not structured_panel:
+                return None
+
+            items = structured_panel["engagementPanelSectionListRenderer"]["content"]["structuredDescriptionContentRenderer"]["items"]
+            
+            for item in items:
+                if "horizontalCardListRenderer" in item:
+                    cards = item["horizontalCardListRenderer"]["cards"]
+                    for card in cards:
+                        if "videoAttributeViewModel" in card:
+                            vm = card["videoAttributeViewModel"]
+                            
+                            # Extract basic fields
+                            result = {
+                                "title": vm.get("title"),
+                                "artist": vm.get("subtitle"),
+                                "album": None,
+                                "album_cover_url": None
+                            }
+                            
+                            # Get image URL
+                            if "image" in vm and "sources" in vm["image"]:
+                                result["album_cover_url"] = vm["image"]["sources"][0]["url"]
+                            
+                            # Get explicit Album label from overflow menu dialog if possible
+                            # This is where the "Album: ..." text often lives
+                            try:
+                                dialog = vm["overflowMenuOnTap"]["innertubeCommand"]["confirmDialogEndpoint"]["content"]["confirmDialogRenderer"]
+                                messages = dialog.get("dialogMessages", [])
+                                for msg in messages:
+                                    full_text = "".join([r.get("text", "") for r in msg.get("runs", [])])
+                                    # Look for "Album: " or equivalent in different languages might be tricky, 
+                                    # but we'll try common patterns or just use secondarySubtitle as fallback
+                                    if "Album:" in full_text:
+                                        result["album"] = full_text.split("Album:")[1].strip().split("\n")[0]
+                            except:
+                                pass
+                            
+                            # Fallback for album name if not found in dialog
+                            if not result["album"] and "secondarySubtitle" in vm:
+                                result["album"] = vm["secondarySubtitle"].get("content")
+
+                            return result
+            
+            return None
+        except Exception:
+            return None
+
     def _extract_track_metadata(self, info: Dict[str, Any]) -> TrackMetadata:
         """Extract metadata from a single video info dict."""
         title = info.get("title", "Unknown Title")
@@ -78,8 +158,14 @@ class YouTubeExtractor:
         source_url = info.get("webpage_url") or info.get("url")
         thumbnail = info.get("thumbnail")
 
+        # Try to get "Golden Truth" metadata from YouTube's structured description
+        structured = None
+        if source_url:
+            structured = self._get_structured_metadata(source_url)
+
         parsed = self.parse_title(title)
 
+        # Base metadata from yt-dlp/title parsing
         metadata = TrackMetadata(
             title=parsed.get("title", title),
             artist=parsed.get("artist", uploader),
@@ -91,13 +177,24 @@ class YouTubeExtractor:
             original_title=title,
         )
 
-        if info.get("release_year"):
+        # Apply structured metadata as priority if found
+        if structured:
+            if structured.get("title"):
+                metadata.title = structured["title"]
+            if structured.get("artist"):
+                metadata.artist = structured["artist"]
+            if structured.get("album"):
+                metadata.album = structured["album"]
+            if structured.get("album_cover_url"):
+                metadata.youtube_album_cover_url = structured["album_cover_url"]
+
+        if info.get("release_year") and not metadata.year:
             metadata.year = info.get("release_year")
 
-        if info.get("track"):
+        if info.get("track") and (metadata.title == title or not metadata.title):
             metadata.title = info.get("track")
 
-        if info.get("artist"):
+        if info.get("artist") and (metadata.artist == uploader or not metadata.artist):
             metadata.artist = info.get("artist")
 
         # Use album info from extra data if available

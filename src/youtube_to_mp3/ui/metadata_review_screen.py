@@ -279,8 +279,7 @@ class MetadataReviewScreen(Screen):
         await self.app.push_screen(BulkEditModal(bulk_callback))
 
     async def action_download(self) -> None:
-        selected = [track for track in self.extraction.tracks if track.selected]
-        if not selected:
+        if not any(track.selected for track in self.extraction.tracks):
             self.notify("Select at least one track to download.", severity="warning")
             return
 

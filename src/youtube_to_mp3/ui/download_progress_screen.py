@@ -23,7 +23,10 @@ class DownloadProgressScreen(Screen[List[DownloadOutcome]]):
         super().__init__()
         self.jobs = list(jobs)
         self.headline = headline
-        self.progress = ProgressBar(total=len(self.jobs))
+        if len(self.jobs) == 1:
+            self.progress = ProgressBar(total=None, show_percentage=False, show_eta=False)
+        else:
+            self.progress = ProgressBar(total=len(self.jobs))
         self.log_widget = Log()
         self._completed = 0
 
@@ -48,7 +51,7 @@ class DownloadProgressScreen(Screen[List[DownloadOutcome]]):
         await app.handle_download_complete(outcomes)
 
     def _handle_progress_update(self, index: int, total: int, job: DownloadJob) -> None:
-        if job.status == "pending":
+        if job.status == "in_progress":
             self.log_widget.write(
                 f"[{index}/{total}] Starting {job.metadata.artist} - {job.metadata.title}"
             )

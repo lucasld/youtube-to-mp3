@@ -117,6 +117,7 @@ class DownloadPipeline:
                 target_dir = base_dir / playlist_folder
 
         jobs: List[DownloadJob] = []
+        used_names: set[str] = set()
         for metadata in tracks:
             if not metadata.selected:
                 continue
@@ -126,6 +127,7 @@ class DownloadPipeline:
                 raise ValueError("Missing source URL for track; cannot download")
 
             output_path = self.downloader.create_output_path(metadata, target_dir)
+            output_path = self._ensure_unique_path(output_path, used_names)
             jobs.append(
                 DownloadJob(url=url, metadata=metadata, output_path=output_path)
             )
@@ -150,6 +152,7 @@ class DownloadPipeline:
             total = len(jobs)
 
             for index, job in enumerate(jobs, start=1):
+                job.status = "in_progress"
                 if progress_callback:
                     progress_callback(index, total, job)
 
@@ -179,7 +182,7 @@ class DownloadPipeline:
     async def _pre_cache_album_covers(self, jobs: List[DownloadJob]) -> None:
         """Pre-cache album covers for all unique artist/album combinations."""
         # Find unique artist/album combinations that need cover retrieval
-        unique_albums: Dict[tuple[str, str], None] = {}
+        unique_albums: Dict[tuple[str, str], Optional[str]] = {}
 
         for job in jobs:
             metadata = job.metadata
@@ -187,17 +190,40 @@ class DownloadPipeline:
                 # Only cache if we don't already have this combination
                 key = (metadata.artist, metadata.album)
                 if key not in unique_albums and not self.cover_cache.get_cover(*key):
-                    unique_albums[key] = None
+                    unique_albums[key] = getattr(metadata, "youtube_album_cover_url", None)
 
         # Retrieve covers for unique combinations
         if unique_albums:
             def _retrieve_covers():
-                for artist, album in unique_albums.keys():
-                    metadata = TrackMetadata(artist=artist, album=album)
+                for (artist, album), yt_cover_url in unique_albums.items():
+                    metadata = TrackMetadata(
+                        title="Unknown Title",
+                        artist=artist,
+                        album=album,
+                        youtube_album_cover_url=yt_cover_url
+                    )
                     cover_result = self.downloader.cover_retriever.retrieve_cover(metadata)
                     self.cover_cache.set_cover(artist, album, cover_result)
 
             await asyncio.to_thread(_retrieve_covers)
+
+    def _ensure_unique_path(self, output_path: Path, used_names: set[str]) -> Path:
+        """Return a non-colliding output path for this batch."""
+        candidate = output_path.name
+        if candidate not in used_names and not output_path.exists():
+            used_names.add(candidate)
+            return output_path
+
+        stem = output_path.stem
+        suffix = output_path.suffix
+        counter = 1
+        while True:
+            candidate = f"{stem} ({counter}){suffix}"
+            candidate_path = output_path.with_name(candidate)
+            if candidate not in used_names and not candidate_path.exists():
+                used_names.add(candidate)
+                return candidate_path
+            counter += 1
 
 
 __all__ = ["DownloadPipeline", "ExtractionResult", "DownloadOutcome", "AlbumCoverCache"]

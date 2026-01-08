@@ -11,10 +11,10 @@ class URLValidator:
     """Validates YouTube URLs."""
 
     YOUTUBE_PATTERNS = [
-        r"(?:https?://)?(?:www\.)?youtube\.com/watch\?v=([a-zA-Z0-9_-]{11})",
+        r"(?:https?://)?(?:[a-zA-Z0-9_-]+\.)?youtube\.com/watch\?v=([a-zA-Z0-9_-]{11})",
         r"(?:https?://)?youtu\.be/([a-zA-Z0-9_-]{11})",
-        r"(?:https?://)?(?:www\.)?youtube\.com/playlist\?list=([a-zA-Z0-9_-]+)",
-        r"(?:https?://)?(?:www\.)?youtube\.com/embed/([a-zA-Z0-9_-]{11})",
+        r"(?:https?://)?(?:[a-zA-Z0-9_-]+\.)?youtube\.com/playlist\?list=([a-zA-Z0-9_-]+)",
+        r"(?:https?://)?(?:[a-zA-Z0-9_-]+\.)?youtube\.com/embed/([a-zA-Z0-9_-]{11})",
     ]
 
     @staticmethod
@@ -34,18 +34,8 @@ class URLValidator:
         if not url:
             return False
 
-        normalized = URLValidator.normalize_url(url)
-
         try:
-            parsed = urlparse(normalized)
-            if parsed.netloc not in ["www.youtube.com", "youtube.com", "youtu.be"]:
-                return False
-
-            return any(
-                re.match(pattern, normalized)
-                for pattern in URLValidator.YOUTUBE_PATTERNS
-            )
-
+            return URLValidator.classify_url(url)[0] != "invalid"
         except Exception:
             return False
 
@@ -53,26 +43,47 @@ class URLValidator:
     def extract_video_id(url: str) -> Optional[str]:
         """Extract YouTube video ID from URL."""
         normalized = URLValidator.normalize_url(url)
-        for pattern in URLValidator.YOUTUBE_PATTERNS[
-            :3
-        ]:  # Skip embed pattern for extraction
-            match = re.search(pattern, normalized)
-            if match:
-                return match.group(1)
+        parsed = urlparse(normalized)
+        host = parsed.netloc.lower()
+
+        if host == "youtu.be":
+            match = re.match(r"/([a-zA-Z0-9_-]{11})", parsed.path)
+            return match.group(1) if match else None
+
+        if not URLValidator._is_youtube_host(host):
+            return None
+
+        if parsed.path == "/watch":
+            query = dict(
+                part.split("=", 1)
+                for part in parsed.query.split("&")
+                if "=" in part
+            )
+            return query.get("v")
+
+        if parsed.path.startswith("/embed/"):
+            match = re.match(r"/embed/([a-zA-Z0-9_-]{11})", parsed.path)
+            return match.group(1) if match else None
+
         return None
 
     @staticmethod
     def extract_playlist_id(url: str) -> Optional[str]:
         """Extract YouTube playlist ID from URL."""
         normalized = URLValidator.normalize_url(url)
+        parsed = urlparse(normalized)
+        if not URLValidator._is_youtube_host(parsed.netloc.lower()):
+            return None
         pattern = r"[?&]list=([a-zA-Z0-9_-]+)"
-        match = re.search(pattern, normalized)
+        match = re.search(pattern, parsed.query)
         return match.group(1) if match else None
 
     @staticmethod
     def classify_url(url: str) -> Tuple[str, Optional[str]]:
         """Classify a YouTube URL as video, playlist, or invalid."""
-        if not URLValidator.is_valid_youtube_url(url):
+        normalized = URLValidator.normalize_url(url)
+        parsed = urlparse(normalized)
+        if not URLValidator._is_youtube_host(parsed.netloc.lower()):
             return "invalid", None
 
         playlist_id = URLValidator.extract_playlist_id(url)
@@ -84,6 +95,13 @@ class URLValidator:
             return "video", video_id
 
         return "unknown", None
+
+    @staticmethod
+    def _is_youtube_host(host: str) -> bool:
+        """Return True for supported YouTube hostnames."""
+        if host == "youtu.be" or host == "youtube.com":
+            return True
+        return host.endswith(".youtube.com")
 
 
 __all__ = ["URLValidator"]

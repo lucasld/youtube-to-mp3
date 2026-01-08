@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +14,7 @@ from mutagen.mp3 import MP3
 
 from .extractor import TrackMetadata
 from .album_cover_retriever import AlbumCoverRetriever, CoverResult
+from .utils.filesystem import sanitize_filename
 
 if TYPE_CHECKING:
     from .pipeline import AlbumCoverCache
@@ -162,24 +162,16 @@ class AudioDownloader:
     ) -> CoverResult:
         """Retrieve and embed album cover into MP3 file with optional cache."""
         try:
-            # Only attempt cover retrieval if we have an album name
-            if not metadata.album:
-                return CoverResult(
-                    success=False,
-                    error="No album name provided",
-                    album_match_confidence="none"
-                )
-
             # Try to get cover from cache first
             cover_result = None
-            if cover_cache and metadata.artist:
+            if cover_cache and metadata.artist and metadata.album:
                 cover_result = cover_cache.get_cover(metadata.artist, metadata.album)
 
             # If not in cache, retrieve it
             if not cover_result:
                 cover_result = self.cover_retriever.retrieve_cover(metadata)
                 # Cache the result for future use
-                if cover_cache and metadata.artist:
+                if cover_cache and metadata.artist and metadata.album:
                     cover_cache.set_cover(metadata.artist, metadata.album, cover_result)
 
             if cover_result.success and cover_result.cover_data:
@@ -250,7 +242,7 @@ class AudioDownloader:
     def create_output_path(self, metadata: TrackMetadata, base_dir: Path) -> Path:
         """Create the output file path for a track."""
         filename = self._render_filename(metadata)
-        sanitized = self._sanitize_filename(filename)
+        sanitized = sanitize_filename(filename)
         return (base_dir / sanitized).with_suffix(".mp3")
 
     def _render_filename(self, metadata: TrackMetadata) -> str:
@@ -271,17 +263,6 @@ class AudioDownloader:
         rendered = self.filename_template.format_map(_SafeDict(mapping))
         return rendered.strip() or "Track"
 
-    def _sanitize_filename(self, name: str) -> str:
-        """Sanitize a string for use in filenames."""
-        invalid_chars = '<>:"/\\|?*'
-        sanitized = name
-        for char in invalid_chars:
-            sanitized = sanitized.replace(char, "_")
-
-        sanitized = re.sub(r"[^\w\s\-.]", "_", sanitized)
-        sanitized = sanitized.strip(" .")
-
-        return sanitized or "track"
 
 
 __all__ = ["DownloadJob", "AudioDownloader", "ProgressCallback"]

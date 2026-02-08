@@ -81,6 +81,10 @@ class AlbumCoverRetriever:
     def __init__(self):
         self.musicbrainz = MusicBrainzRetriever()
         self.itunes = ITunesRetriever()
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'YouTubeToMP3/1.0 (https://github.com/lucasld/youtube-to-mp3)'
+        })
 
     def retrieve_cover(self, metadata: TrackMetadata) -> CoverResult:
         """
@@ -203,10 +207,11 @@ class AlbumCoverRetriever:
                 error=f"Unexpected error during track-only cover retrieval: {str(e)}",
                 album_match_confidence="error"
             )
+
     def _download_cover_data(self, url: str) -> Optional[bytes]:
         """Download cover image data."""
         try:
-            response = requests.get(url, timeout=COVER_REQUEST_TIMEOUT, stream=True)
+            response = self.session.get(url, timeout=COVER_REQUEST_TIMEOUT, stream=True)
             response.raise_for_status()
 
             # Basic validation - check if it's actually an image
@@ -284,6 +289,7 @@ class MusicBrainzRetriever:
             return CoverResult(success=False, error="No cover found via recording search")
         except Exception as e:
             return CoverResult(success=False, error=f"MusicBrainz error: {str(e)}")
+
     def _search_album_direct(self, metadata: TrackMetadata) -> CoverResult:
         """Direct album search with validation."""
         if not metadata.album:
@@ -459,6 +465,7 @@ class ITunesRetriever:
             )
         except Exception:
             return CoverResult(success=False)
+
     def _search_album_direct(self, metadata: TrackMetadata) -> CoverResult:
         """Direct album search with validation."""
         if not metadata.album:
@@ -569,6 +576,7 @@ class ITunesRetriever:
             return data.get('results', [])
         except Exception:
             return []
+
     def _get_best_cover_url(self, album: Dict) -> str:
         """Get the best cover URL from album data."""
         # iTunes provides small images by default, try to get larger versions

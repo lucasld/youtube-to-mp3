@@ -43,7 +43,7 @@ class PlaylistInfo:
 
 
 class YouTubeExtractor:
-    """Extracts metadata from YouTube URLs using yt-dlp."""
+    """Extracts metadata from YouTube URLs using yt-dlp and direct scraping."""
 
     def __init__(self):
         self._ydl_opts = {
@@ -52,6 +52,11 @@ class YouTubeExtractor:
             "extract_flat": False,
             "skip_download": True,
         }
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+        })
 
     def extract_metadata(self, url: str) -> Union[TrackMetadata, PlaylistInfo]:
         """
@@ -79,11 +84,7 @@ class YouTubeExtractor:
         This captures the "Music in this video" section.
         """
         try:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept-Language": "en-US,en;q=0.9",
-            }
-            response = requests.get(url, headers=headers, timeout=10)
+            response = self.session.get(url, timeout=10)
             if response.status_code != 200:
                 return None
 
@@ -94,26 +95,29 @@ class YouTubeExtractor:
 
             data = json.loads(match.group(1))
             
-            # Find the structured description engagement panel
+            # Safe traversal to find the structured description panel
             panels = data.get("engagementPanels", [])
-            structured_panel = None
-            for p in panels:
-                if p.get("engagementPanelSectionListRenderer", {}).get("panelIdentifier") == "engagement-panel-structured-description":
-                    structured_panel = p
-                    break
+            structured_panel = next((
+                p for p in panels 
+                if self._get_path(p, ["engagementPanelSectionListRenderer", "panelIdentifier"]) == "engagement-panel-structured-description"
+            ), None)
             
             if not structured_panel:
                 return None
 
-            items = structured_panel["engagementPanelSectionListRenderer"]["content"]["structuredDescriptionContentRenderer"]["items"]
+            items = self._get_path(structured_panel, [
+                "engagementPanelSectionListRenderer", 
+                "content", 
+                "structuredDescriptionContentRenderer", 
+                "items"
+            ], default=[])
             
             for item in items:
                 if "horizontalCardListRenderer" in item:
-                    cards = item["horizontalCardListRenderer"]["cards"]
+                    cards = item["horizontalCardListRenderer"].get("cards", [])
                     for card in cards:
-                        if "videoAttributeViewModel" in card:
-                            vm = card["videoAttributeViewModel"]
-                            
+                        vm = card.get("videoAttributeViewModel")
+                        if vm:
                             # Extract basic fields
                             result = {
                                 "title": vm.get("title"),
@@ -123,32 +127,47 @@ class YouTubeExtractor:
                             }
                             
                             # Get image URL
-                            if "image" in vm and "sources" in vm["image"]:
-                                result["album_cover_url"] = vm["image"]["sources"][0]["url"]
+                            sources = self._get_path(vm, ["image", "sources"], default=[])
+                            if sources:
+                                result["album_cover_url"] = sources[0].get("url")
                             
-                            # Get explicit Album label from overflow menu dialog if possible
-                            # This is where the "Album: ..." text often lives
+                            # Get explicit Album label
                             try:
-                                dialog = vm["overflowMenuOnTap"]["innertubeCommand"]["confirmDialogEndpoint"]["content"]["confirmDialogRenderer"]
-                                messages = dialog.get("dialogMessages", [])
-                                for msg in messages:
-                                    full_text = "".join([r.get("text", "") for r in msg.get("runs", [])])
-                                    # Look for "Album: " or equivalent in different languages might be tricky, 
-                                    # but we'll try common patterns or just use secondarySubtitle as fallback
-                                    if "Album:" in full_text:
-                                        result["album"] = full_text.split("Album:")[1].strip().split("\n")[0]
-                            except:
+                                dialog = self._get_path(vm, [
+                                    "overflowMenuOnTap", 
+                                    "innertubeCommand", 
+                                    "confirmDialogEndpoint", 
+                                    "content", 
+                                    "confirmDialogRenderer"
+                                ])
+                                if dialog:
+                                    messages = dialog.get("dialogMessages", [])
+                                    for msg in messages:
+                                        full_text = "".join([r.get("text", "") for r in msg.get("runs", [])])
+                                        if "Album:" in full_text:
+                                            result["album"] = full_text.split("Album:")[1].strip().split("\n")[0]
+                            except Exception:
                                 pass
                             
-                            # Fallback for album name if not found in dialog
-                            if not result["album"] and "secondarySubtitle" in vm:
-                                result["album"] = vm["secondarySubtitle"].get("content")
+                            # Fallback for album name
+                            if not result["album"]:
+                                result["album"] = self._get_path(vm, ["secondarySubtitle", "content"])
 
                             return result
             
             return None
         except Exception:
             return None
+
+    def _get_path(self, obj: Any, path: List[str], default: Any = None) -> Any:
+        """Safely traverse a nested dictionary/list structure."""
+        current = obj
+        for key in path:
+            if isinstance(current, dict) and key in current:
+                current = current[key]
+            else:
+                return default
+        return current
 
     def _extract_track_metadata(self, info: Dict[str, Any]) -> TrackMetadata:
         """Extract metadata from a single video info dict."""

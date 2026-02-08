@@ -74,9 +74,14 @@ class URLValidator:
         parsed = urlparse(normalized)
         if not URLValidator._is_youtube_host(parsed.netloc.lower()):
             return None
-        pattern = r"[?&]list=([a-zA-Z0-9_-]+)"
-        match = re.search(pattern, parsed.query)
-        return match.group(1) if match else None
+        
+        # Parse query parameters safely
+        params = dict(
+            part.split("=", 1)
+            for part in parsed.query.split("&")
+            if "=" in part
+        )
+        return params.get("list")
 
     @staticmethod
     def classify_url(url: str) -> Tuple[str, Optional[str]]:

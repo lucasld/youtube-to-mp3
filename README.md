@@ -26,6 +26,14 @@ youtube-to-mp3 [URL]
 ### Options
 - `--output-dir PATH`: Specify where the downloaded files should be saved.
 - `--config PATH`: Path to a custom configuration file.
+- `--debug`: Enable verbose rotating file logs for troubleshooting.
+
+### Logs
+- macOS: `~/Library/Logs/youtube-to-mp3/youtube-to-mp3.log`
+- Linux: `~/.local/state/youtube-to-mp3/logs/youtube-to-mp3.log`
+- Windows: `~/AppData/Local/youtube-to-mp3/logs/youtube-to-mp3.log`
+
+Logs are rotated automatically (`~2MB` per file, up to 5 backups).
 
 ## Technical Architecture
 The system is designed with a clean separation of concerns, utilizing an asynchronous pipeline to coordinate extraction, downloading, and tagging.

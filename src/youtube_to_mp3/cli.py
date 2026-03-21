@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 from typing import Optional
 
@@ -10,8 +11,12 @@ import click
 
 from .app import YouTubeToMp3App
 from .config import AppConfig, load_config
+from .logging_setup import configure_logging
 from .pipeline import DownloadPipeline
 from .utils.validation import URLValidator
+
+
+logger = logging.getLogger(__name__)
 
 
 def _load_app_config(
@@ -89,12 +94,29 @@ def _run_non_interactive(url: str, config: AppConfig) -> None:
     type=click.Path(path_type=Path),
     help="Output directory for downloaded files",
 )
+@click.option(
+    "--debug",
+    is_flag=True,
+    default=False,
+    help="Enable verbose logging to the rotating log file",
+)
 def main(
     url: Optional[str] = None,
     config_path: Optional[Path] = None,
     output_dir: Optional[Path] = None,
+    debug: bool = False,
 ) -> None:
     """YouTube to MP3 Converter."""
+
+    log_file = configure_logging(debug=debug)
+    logger.info("Starting youtube-to-mp3")
+    logger.debug(
+        "CLI arguments: url=%s, config_path=%s, output_dir=%s",
+        url,
+        config_path,
+        output_dir,
+    )
+    logger.info("Log file: %s", log_file)
 
     config = _load_app_config(
         str(config_path) if config_path else None,

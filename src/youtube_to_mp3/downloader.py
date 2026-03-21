@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
 import yt_dlp
+from yt_dlp.utils import DownloadError
 from mutagen.id3 import ID3, TALB, TCON, TIT2, TPE1, TRCK, TYER, APIC
 from mutagen.mp3 import MP3
 
@@ -22,12 +23,26 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class _YtDlpLogger:
+    """Adapter that routes yt-dlp logs to application logging."""
+
+    def debug(self, msg: str) -> None:
+        logger.debug("yt-dlp: %s", msg)
+
+    def warning(self, msg: str) -> None:
+        logger.warning("yt-dlp: %s", msg)
+
+    def error(self, msg: str) -> None:
+        logger.error("yt-dlp: %s", msg)
+
+
 ProgressCallback = Callable[[int, int, "DownloadJob"], None]
 
 
 @dataclass
 class DownloadResult:
     """Result of a single download operation."""
+
     success: bool
     error: Optional[str] = None
     cover_result: Optional[CoverResult] = None
@@ -84,7 +99,15 @@ class AudioDownloader:
             job.error = None
             return DownloadResult(success=True, cover_result=cover_result)
 
+        except DownloadError as exc:
+            error_message = self._format_download_error(exc)
+            logger.warning("Download failed for %s: %s", job.url, error_message)
+            job.status = "error"
+            job.error = error_message
+            return DownloadResult(success=False, error=error_message)
+
         except Exception as exc:  # pragma: no cover - defensive guard
+            logger.exception("Unexpected download failure for %s", job.url)
             job.status = "error"
             job.error = str(exc)
             return DownloadResult(success=False, error=str(exc))
@@ -101,21 +124,26 @@ class AudioDownloader:
                 }
             ],
             "outtmpl": str(output_path.with_suffix("").with_suffix(".%(ext)s")),
+            "logger": _YtDlpLogger(),
             "quiet": True,
-            "no_warnings": True,
+            "no_warnings": False,
+            "noprogress": True,
             "noplaylist": True,
             "overwrites": True,
         }
 
-    def _embed_metadata(self, mp3_path: Path, metadata: TrackMetadata) -> Optional[CoverResult]:
-        """Embed metadata and album cover into MP3 file. Returns cover result."""
-        return self._embed_metadata_with_cache(mp3_path, metadata, None)
+    def _format_download_error(self, exc: DownloadError) -> str:
+        """Return a user-facing error message for yt-dlp download failures."""
+        message = str(exc)
+        if "HTTP Error 403" in message:
+            return "HTTP Error 403: Forbidden (YouTube rejected this stream; retry or update yt-dlp)"
+        return message
 
     def _embed_metadata_with_cache(
         self,
         mp3_path: Path,
         metadata: TrackMetadata,
-        cover_cache: Optional["AlbumCoverCache"]
+        cover_cache: Optional["AlbumCoverCache"],
     ) -> Optional[CoverResult]:
         """Embed metadata and album cover into MP3 file with optional cache."""
         cover_result = None
@@ -141,7 +169,9 @@ class AudioDownloader:
                 audio.tags.add(TRCK(text=track_info))
 
             # Retrieve and embed album cover
-            cover_result = self._embed_album_cover_with_cache(audio, metadata, cover_cache)
+            cover_result = self._embed_album_cover_with_cache(
+                audio, metadata, cover_cache
+            )
 
             audio.save()
 
@@ -150,15 +180,11 @@ class AudioDownloader:
 
         return cover_result
 
-    def _embed_album_cover(self, audio: MP3, metadata: TrackMetadata) -> CoverResult:
-        """Retrieve and embed album cover into MP3 file. Returns cover result."""
-        return self._embed_album_cover_with_cache(audio, metadata, None)
-
     def _embed_album_cover_with_cache(
         self,
         audio: MP3,
         metadata: TrackMetadata,
-        cover_cache: Optional["AlbumCoverCache"]
+        cover_cache: Optional["AlbumCoverCache"],
     ) -> CoverResult:
         """Retrieve and embed album cover into MP3 file with optional cache."""
         try:
@@ -188,7 +214,7 @@ class AudioDownloader:
                     mime=mime_type,
                     type=3,  # Cover (front)
                     desc="Cover",
-                    data=cover_result.cover_data
+                    data=cover_result.cover_data,
                 )
                 audio.tags.add(apic)
 
@@ -205,7 +231,7 @@ class AudioDownloader:
             return CoverResult(
                 success=False,
                 error=f"Cover embedding failed: {str(exc)}",
-                album_match_confidence="error"
+                album_match_confidence="error",
             )
 
     def _guess_mime_type(self, image_data: bytes) -> str:
@@ -214,15 +240,15 @@ class AudioDownloader:
             return "image/jpeg"
 
         # Check for JPEG
-        if image_data[:2] == b'\xff\xd8':
+        if image_data[:2] == b"\xff\xd8":
             return "image/jpeg"
 
         # Check for PNG
-        if image_data[:8] == b'\x89PNG\r\n\x1a\n':
+        if image_data[:8] == b"\x89PNG\r\n\x1a\n":
             return "image/png"
 
         # Check for GIF
-        if image_data[:6] in (b'GIF87a', b'GIF89a'):
+        if image_data[:6] in (b"GIF87a", b"GIF89a"):
             return "image/gif"
 
         # Default to JPEG
@@ -262,7 +288,6 @@ class AudioDownloader:
 
         rendered = self.filename_template.format_map(_SafeDict(mapping))
         return rendered.strip() or "Track"
-
 
 
 __all__ = ["DownloadJob", "AudioDownloader", "ProgressCallback"]

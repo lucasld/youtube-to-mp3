@@ -25,7 +25,7 @@ classifiers = [
     "Topic :: Utilities",
 ]
 dependencies = [
-    "yt-dlp>=2023.0.0",
+    "yt-dlp>=2026.3.17",
     "mutagen>=1.45.0",
     "textual>=0.50.0",
     "click>=8.0.0",

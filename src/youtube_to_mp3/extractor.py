@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import json
 import requests
@@ -9,6 +10,9 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
 import yt_dlp
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -53,10 +57,12 @@ class YouTubeExtractor:
             "skip_download": True,
         }
         self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9",
-        })
+        self.session.headers.update(
+            {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
+            }
+        )
 
     def extract_metadata(self, url: str) -> Union[TrackMetadata, PlaylistInfo]:
         """
@@ -75,6 +81,7 @@ class YouTubeExtractor:
                     return self._extract_track_metadata(info)
 
         except Exception as e:
+            logger.warning("Metadata extraction failed for %s: %s", url, e)
             # Fallback: try to extract basic info from URL patterns
             return self._fallback_metadata_extraction(url, str(e))
 
@@ -94,24 +101,35 @@ class YouTubeExtractor:
                 return None
 
             data = json.loads(match.group(1))
-            
+
             # Safe traversal to find the structured description panel
             panels = data.get("engagementPanels", [])
-            structured_panel = next((
-                p for p in panels 
-                if self._get_path(p, ["engagementPanelSectionListRenderer", "panelIdentifier"]) == "engagement-panel-structured-description"
-            ), None)
-            
+            structured_panel = next(
+                (
+                    p
+                    for p in panels
+                    if self._get_path(
+                        p, ["engagementPanelSectionListRenderer", "panelIdentifier"]
+                    )
+                    == "engagement-panel-structured-description"
+                ),
+                None,
+            )
+
             if not structured_panel:
                 return None
 
-            items = self._get_path(structured_panel, [
-                "engagementPanelSectionListRenderer", 
-                "content", 
-                "structuredDescriptionContentRenderer", 
-                "items"
-            ], default=[])
-            
+            items = self._get_path(
+                structured_panel,
+                [
+                    "engagementPanelSectionListRenderer",
+                    "content",
+                    "structuredDescriptionContentRenderer",
+                    "items",
+                ],
+                default=[],
+            )
+
             for item in items:
                 if "horizontalCardListRenderer" in item:
                     cards = item["horizontalCardListRenderer"].get("cards", [])
@@ -123,38 +141,54 @@ class YouTubeExtractor:
                                 "title": vm.get("title"),
                                 "artist": vm.get("subtitle"),
                                 "album": None,
-                                "album_cover_url": None
+                                "album_cover_url": None,
                             }
-                            
+
                             # Get image URL
-                            sources = self._get_path(vm, ["image", "sources"], default=[])
+                            sources = self._get_path(
+                                vm, ["image", "sources"], default=[]
+                            )
                             if sources:
                                 result["album_cover_url"] = sources[0].get("url")
-                            
+
                             # Get explicit Album label
                             try:
-                                dialog = self._get_path(vm, [
-                                    "overflowMenuOnTap", 
-                                    "innertubeCommand", 
-                                    "confirmDialogEndpoint", 
-                                    "content", 
-                                    "confirmDialogRenderer"
-                                ])
+                                dialog = self._get_path(
+                                    vm,
+                                    [
+                                        "overflowMenuOnTap",
+                                        "innertubeCommand",
+                                        "confirmDialogEndpoint",
+                                        "content",
+                                        "confirmDialogRenderer",
+                                    ],
+                                )
                                 if dialog:
                                     messages = dialog.get("dialogMessages", [])
                                     for msg in messages:
-                                        full_text = "".join([r.get("text", "") for r in msg.get("runs", [])])
+                                        full_text = "".join(
+                                            [
+                                                r.get("text", "")
+                                                for r in msg.get("runs", [])
+                                            ]
+                                        )
                                         if "Album:" in full_text:
-                                            result["album"] = full_text.split("Album:")[1].strip().split("\n")[0]
+                                            result["album"] = (
+                                                full_text.split("Album:")[1]
+                                                .strip()
+                                                .split("\n")[0]
+                                            )
                             except Exception:
                                 pass
-                            
+
                             # Fallback for album name
                             if not result["album"]:
-                                result["album"] = self._get_path(vm, ["secondarySubtitle", "content"])
+                                result["album"] = self._get_path(
+                                    vm, ["secondarySubtitle", "content"]
+                                )
 
                             return result
-            
+
             return None
         except Exception:
             return None
@@ -258,7 +292,9 @@ class YouTubeExtractor:
             total_tracks=total_entries,
         )
 
-    def _is_album_playlist(self, info: Dict[str, Any], entries: List[Dict[str, Any]]) -> bool:
+    def _is_album_playlist(
+        self, info: Dict[str, Any], entries: List[Dict[str, Any]]
+    ) -> bool:
         """Determine if a playlist represents an album using multiple heuristics."""
         # Direct playlist type indicator
         if info.get("playlist_type") == "album":
@@ -347,6 +383,7 @@ class YouTubeExtractor:
 
     def _fallback_metadata_extraction(self, url: str, error: str) -> TrackMetadata:
         """Fallback metadata extraction when yt-dlp fails."""
+        logger.info("Using fallback metadata extraction for %s due to: %s", url, error)
         # Try to extract video ID from URL
         video_id = self._extract_video_id(url)
         if video_id:

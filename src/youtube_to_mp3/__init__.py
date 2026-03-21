@@ -4,6 +4,4 @@ as properly tagged MP3 files."""
 __version__ = "0.1.0"
 __author__ = "YouTube to MP3 Converter"
 
-from .cli import main
-
-__all__ = ["main"]
+__all__ = ["__version__", "__author__"]

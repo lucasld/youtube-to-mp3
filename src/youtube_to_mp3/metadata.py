@@ -28,7 +28,8 @@ class MetadataCleaner:
             source_url=metadata.source_url,
             selected=metadata.selected,
             thumbnail_url=metadata.thumbnail_url,
-            youtube_album_cover_url=getattr(metadata, "youtube_album_cover_url", None),
+            source_cover_url=metadata.source_cover_url,
+            source=metadata.source,
             original_title=metadata.original_title,
             extra=dict(metadata.extra),
         )

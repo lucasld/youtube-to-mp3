@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import requests
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any, Dict, List, Optional, Tuple
+
+import requests
 
 from .config import (
     ALBUM_NAME_WORD_OVERLAP_RATIO,
@@ -19,6 +20,13 @@ from .config import (
 from .extractor import TrackMetadata
 
 
+def _dictionary_list(value: Any) -> List[Dict[str, Any]]:
+    """Return only dictionary items from an external JSON list."""
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
 class AlbumMatcher:
     """Shared utilities for album name matching and normalization."""
 
@@ -27,8 +35,8 @@ class AlbumMatcher:
         """Normalize album name for better matching."""
         album_name = album_name.strip()
         # Remove common suffixes that might vary
-        album_name = album_name.split('(')[0].strip()
-        album_name = album_name.split('[')[0].strip()
+        album_name = album_name.split("(")[0].strip()
+        album_name = album_name.split("[")[0].strip()
         return album_name
 
     @staticmethod
@@ -54,7 +62,9 @@ class AlbumMatcher:
 
         if expected_words and returned_words:
             common_words = expected_words.intersection(returned_words)
-            overlap_ratio = len(common_words) / max(len(expected_words), len(returned_words))
+            overlap_ratio = len(common_words) / max(
+                len(expected_words), len(returned_words)
+            )
 
             if overlap_ratio >= ALBUM_NAME_WORD_OVERLAP_RATIO:
                 return True, "word_overlap"
@@ -65,6 +75,7 @@ class AlbumMatcher:
 @dataclass
 class CoverResult:
     """Result of cover retrieval."""
+
     success: bool
     cover_url: Optional[str] = None
     cover_data: Optional[bytes] = None
@@ -78,38 +89,38 @@ class CoverResult:
 class AlbumCoverRetriever:
     """Album cover retriever with MusicBrainz primary and iTunes fallback."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.musicbrainz = MusicBrainzRetriever()
         self.itunes = ITunesRetriever()
         self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'YouTubeToMP3/1.0 (https://github.com/lucasld/youtube-to-mp3)'
-        })
+        self.session.headers.update(
+            {
+                "User-Agent": "YouTubeToMP3/1.0 (https://github.com/lucasld/youtube-to-mp3)"
+            }
+        )
 
     def retrieve_cover(self, metadata: TrackMetadata) -> CoverResult:
         """
-        Retrieve album cover using YouTube source (if available), 
-        otherwise MusicBrainz primary, iTunes fallback.
+        Retrieve the provider image first, then try MusicBrainz and iTunes.
 
         Returns CoverResult with cover_url and optionally downloaded cover_data.
         """
-        # Strategy 0: YouTube "Golden Truth" cover (highest priority)
-        if hasattr(metadata, "youtube_album_cover_url") and metadata.youtube_album_cover_url:
-            cover_data = self._download_cover_data(metadata.youtube_album_cover_url)
+        if metadata.source_cover_url:
+            cover_data = self._download_cover_data(metadata.source_cover_url)
             if cover_data:
                 return CoverResult(
                     success=True,
-                    cover_url=metadata.youtube_album_cover_url,
+                    cover_url=metadata.source_cover_url,
                     cover_data=cover_data,
-                    source="youtube",
-                    album_match_confidence="exact"
+                    source=metadata.source or "media_service",
+                    album_match_confidence="exact",
                 )
 
         if not metadata.artist:
             return CoverResult(
                 success=False,
                 error="No artist name provided",
-                album_match_confidence="none"
+                album_match_confidence="none",
             )
 
         if not metadata.album:
@@ -128,7 +139,7 @@ class AlbumCoverRetriever:
                         cover_data=cover_data,
                         release_info=mb_result.release_info,
                         source="musicbrainz",
-                        album_match_confidence=mb_result.album_match_confidence
+                        album_match_confidence=mb_result.album_match_confidence,
                     )
 
             # Fallback to iTunes
@@ -143,21 +154,21 @@ class AlbumCoverRetriever:
                         cover_data=cover_data,
                         release_info=itunes_result.release_info,
                         source="itunes",
-                        album_match_confidence=itunes_result.album_match_confidence
+                        album_match_confidence=itunes_result.album_match_confidence,
                     )
 
             # No cover found from either service
             return CoverResult(
                 success=False,
                 error="No album cover found from MusicBrainz or iTunes",
-                album_match_confidence="none"
+                album_match_confidence="none",
             )
 
         except Exception as e:
             return CoverResult(
                 success=False,
                 error=f"Unexpected error during cover retrieval: {str(e)}",
-                album_match_confidence="error"
+                album_match_confidence="error",
             )
 
     def _retrieve_cover_without_album(self, metadata: TrackMetadata) -> CoverResult:
@@ -166,7 +177,7 @@ class AlbumCoverRetriever:
             return CoverResult(
                 success=False,
                 error="No track title provided",
-                album_match_confidence="none"
+                album_match_confidence="none",
             )
 
         try:
@@ -180,7 +191,7 @@ class AlbumCoverRetriever:
                         cover_data=cover_data,
                         release_info=mb_result.release_info,
                         source="musicbrainz",
-                        album_match_confidence=mb_result.album_match_confidence
+                        album_match_confidence=mb_result.album_match_confidence,
                     )
 
             itunes_result = self.itunes.retrieve_cover_for_track(metadata)
@@ -193,19 +204,19 @@ class AlbumCoverRetriever:
                         cover_data=cover_data,
                         release_info=itunes_result.release_info,
                         source="itunes",
-                        album_match_confidence=itunes_result.album_match_confidence
+                        album_match_confidence=itunes_result.album_match_confidence,
                     )
 
             return CoverResult(
                 success=False,
                 error="No cover found for track-only search",
-                album_match_confidence="none"
+                album_match_confidence="none",
             )
         except Exception as e:
             return CoverResult(
                 success=False,
                 error=f"Unexpected error during track-only cover retrieval: {str(e)}",
-                album_match_confidence="error"
+                album_match_confidence="error",
             )
 
     def _download_cover_data(self, url: str) -> Optional[bytes]:
@@ -215,12 +226,12 @@ class AlbumCoverRetriever:
             response.raise_for_status()
 
             # Basic validation - check if it's actually an image
-            content_type = response.headers.get('content-type', '').lower()
-            if not content_type.startswith('image/'):
+            content_type = response.headers.get("content-type", "").lower()
+            if not content_type.startswith("image/"):
                 return None
 
             # Check content length to avoid downloading huge files
-            content_length = response.headers.get('content-length')
+            content_length = response.headers.get("content-length")
             if content_length and int(content_length) > MAX_COVER_FILE_SIZE:
                 return None
             data = bytearray()
@@ -251,11 +262,13 @@ class MusicBrainzRetriever:
     BASE_URL = "https://musicbrainz.org/ws/2"
     COVER_ART_URL = "https://coverartarchive.org"
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'YouTubeToMP3/1.0 (https://github.com/lucasld/youtube-to-mp3)'
-        })
+        self.session.headers.update(
+            {
+                "User-Agent": "YouTubeToMP3/1.0 (https://github.com/lucasld/youtube-to-mp3)"
+            }
+        )
 
     def retrieve_cover(self, metadata: TrackMetadata) -> CoverResult:
         """Retrieve cover using MusicBrainz."""
@@ -286,7 +299,9 @@ class MusicBrainzRetriever:
             result = self._search_recording(metadata)
             if result.success:
                 return result
-            return CoverResult(success=False, error="No cover found via recording search")
+            return CoverResult(
+                success=False, error="No cover found via recording search"
+            )
         except Exception as e:
             return CoverResult(success=False, error=f"MusicBrainz error: {str(e)}")
 
@@ -300,15 +315,17 @@ class MusicBrainzRetriever:
         )
 
         for release in releases:
-            matches, confidence = AlbumMatcher.album_names_match(release['title'], metadata.album)
+            matches, confidence = AlbumMatcher.album_names_match(
+                release["title"], metadata.album
+            )
             if matches:
-                cover_url = self._get_cover_url(release['id'])
+                cover_url = self._get_cover_url(release["id"])
                 if cover_url:
                     return CoverResult(
                         success=True,
                         cover_url=cover_url,
-                        release_info={'title': release['title'], 'id': release['id']},
-                        album_match_confidence=confidence
+                        release_info={"title": release["title"], "id": release["id"]},
+                        album_match_confidence=confidence,
                     )
 
         return CoverResult(success=False)
@@ -319,18 +336,22 @@ class MusicBrainzRetriever:
             return CoverResult(success=False)
 
         # Try with just artist name
-        releases = self._search_releases(metadata.artist, "", limit=EXTENDED_SEARCH_LIMIT)
+        releases = self._search_releases(
+            metadata.artist, "", limit=EXTENDED_SEARCH_LIMIT
+        )
 
         for release in releases:
-            matches, confidence = AlbumMatcher.album_names_match(release['title'], metadata.album)
-            if matches and confidence in ['exact', 'partial', 'word_overlap']:
-                cover_url = self._get_cover_url(release['id'])
+            matches, confidence = AlbumMatcher.album_names_match(
+                release["title"], metadata.album
+            )
+            if matches and confidence in ["exact", "partial", "word_overlap"]:
+                cover_url = self._get_cover_url(release["id"])
                 if cover_url:
                     return CoverResult(
                         success=True,
                         cover_url=cover_url,
-                        release_info={'title': release['title'], 'id': release['id']},
-                        album_match_confidence=confidence
+                        release_info={"title": release["title"], "id": release["id"]},
+                        album_match_confidence=confidence,
                     )
 
         return CoverResult(success=False)
@@ -339,24 +360,31 @@ class MusicBrainzRetriever:
         """Search by recording (track) name."""
         try:
             query = f'artist:"{metadata.artist}" AND recording:"{metadata.title}"'
-            params = {'query': query, 'limit': DEFAULT_SEARCH_LIMIT, 'fmt': 'json'}
+            params = {"query": query, "limit": DEFAULT_SEARCH_LIMIT, "fmt": "json"}
 
-            response = self.session.get(f"{self.BASE_URL}/recording", params=params)
+            response = self.session.get(
+                f"{self.BASE_URL}/recording",
+                params=params,
+                timeout=COVER_REQUEST_TIMEOUT,
+            )
             response.raise_for_status()
 
             data = response.json()
-            recordings = data.get('recordings', [])
+            recordings = _dictionary_list(data.get("recordings"))
 
             for recording in recordings:
-                release = recording.get('releases', [{}])[0]
-                if release and 'id' in release:
-                    cover_url = self._get_cover_url(release['id'])
+                release = recording.get("releases", [{}])[0]
+                if release and "id" in release:
+                    cover_url = self._get_cover_url(release["id"])
                     if cover_url:
                         return CoverResult(
                             success=True,
                             cover_url=cover_url,
-                            release_info={'title': release.get('title', ''), 'id': release['id']},
-                            album_match_confidence="recording_match"
+                            release_info={
+                                "title": release.get("title", ""),
+                                "id": release["id"],
+                            },
+                            album_match_confidence="recording_match",
                         )
 
         except Exception:
@@ -364,7 +392,9 @@ class MusicBrainzRetriever:
 
         return CoverResult(success=False)
 
-    def _search_releases(self, artist: str, album: str, limit: int = 5) -> List[Dict]:
+    def _search_releases(
+        self, artist: str, album: str, limit: int = 5
+    ) -> List[Dict[str, Any]]:
         """Search for releases by artist and album name."""
         query_parts = []
         if artist:
@@ -375,36 +405,44 @@ class MusicBrainzRetriever:
         if not query_parts:
             return []
 
-        query = ' AND '.join(query_parts)
-        params = {'query': query, 'limit': limit, 'fmt': 'json'}
+        query = " AND ".join(query_parts)
+        params = {"query": query, "limit": limit, "fmt": "json"}
 
         try:
-            response = self.session.get(f"{self.BASE_URL}/release", params=params)
+            response = self.session.get(
+                f"{self.BASE_URL}/release",
+                params=params,
+                timeout=COVER_REQUEST_TIMEOUT,
+            )
             response.raise_for_status()
             data = response.json()
-            return data.get('releases', [])
+            return _dictionary_list(data.get("releases"))
         except Exception:
             return []
 
     def _get_cover_url(self, release_id: str) -> Optional[str]:
         """Get cover art URL for a release."""
         try:
-            response = self.session.get(f"{self.COVER_ART_URL}/release/{release_id}")
+            response = self.session.get(
+                f"{self.COVER_ART_URL}/release/{release_id}",
+                timeout=COVER_REQUEST_TIMEOUT,
+            )
             if response.status_code == 404:
                 return None
             response.raise_for_status()
 
             data = response.json()
-            images = data.get('images', [])
+            images = _dictionary_list(data.get("images"))
 
             # Prefer front cover
             for image in images:
-                if image.get('front'):
-                    return image['image']
+                image_url = image.get("image")
+                if image.get("front") and isinstance(image_url, str):
+                    return image_url
 
             # Fallback to any image
-            if images:
-                return images[0]['image']
+            if images and isinstance(images[0].get("image"), str):
+                return str(images[0]["image"])
 
         except Exception:
             pass
@@ -418,11 +456,13 @@ class ITunesRetriever:
 
     BASE_URL = "https://itunes.apple.com/search"
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'YouTubeToMP3/1.0 (https://github.com/lucasld/youtube-to-mp3)'
-        })
+        self.session.headers.update(
+            {
+                "User-Agent": "YouTubeToMP3/1.0 (https://github.com/lucasld/youtube-to-mp3)"
+            }
+        )
 
     def retrieve_cover(self, metadata: TrackMetadata) -> CoverResult:
         """Retrieve cover using iTunes."""
@@ -457,11 +497,13 @@ class ITunesRetriever:
                 success=True,
                 cover_url=self._get_best_cover_url(track),
                 release_info={
-                    'title': track.get('trackName', ''),
-                    'artist': track.get('artistName', ''),
-                    'year': track.get('releaseDate', '')[:4] if track.get('releaseDate') else None
+                    "title": track.get("trackName", ""),
+                    "artist": track.get("artistName", ""),
+                    "year": track.get("releaseDate", "")[:4]
+                    if track.get("releaseDate")
+                    else None,
                 },
-                album_match_confidence="track_only"
+                album_match_confidence="track_only",
             )
         except Exception:
             return CoverResult(success=False)
@@ -477,46 +519,50 @@ class ITunesRetriever:
 
         for album in albums:
             matches, confidence = AlbumMatcher.album_names_match(
-                album['collectionName'], metadata.album
+                album["collectionName"], metadata.album
             )
-            if matches and confidence in ['exact', 'partial', 'word_overlap']:
+            if matches and confidence in ["exact", "partial", "word_overlap"]:
                 return CoverResult(
                     success=True,
                     cover_url=self._get_best_cover_url(album),
                     release_info={
-                        'title': album['collectionName'],
-                        'artist': album.get('artistName', ''),
-                        'year': (
-                            album.get('releaseDate', '')[:4]
-                            if album.get('releaseDate') else None
-                        )
+                        "title": album["collectionName"],
+                        "artist": album.get("artistName", ""),
+                        "year": (
+                            album.get("releaseDate", "")[:4]
+                            if album.get("releaseDate")
+                            else None
+                        ),
                     },
-                    album_match_confidence=confidence
+                    album_match_confidence=confidence,
                 )
 
         return CoverResult(success=False)
 
     def _search_artist_albums(self, metadata: TrackMetadata) -> CoverResult:
         """Search artist's albums and find best match."""
-        albums = self._search_albums(metadata.artist, "", limit=ARTIST_ALBUMS_SEARCH_LIMIT)
+        albums = self._search_albums(
+            metadata.artist, "", limit=ARTIST_ALBUMS_SEARCH_LIMIT
+        )
 
         for album in albums:
             matches, confidence = AlbumMatcher.album_names_match(
-                album['collectionName'], metadata.album or ""
+                album["collectionName"], metadata.album or ""
             )
             if matches:
                 return CoverResult(
                     success=True,
                     cover_url=self._get_best_cover_url(album),
                     release_info={
-                        'title': album['collectionName'],
-                        'artist': album.get('artistName', ''),
-                        'year': (
-                            album.get('releaseDate', '')[:4]
-                            if album.get('releaseDate') else None
-                        )
+                        "title": album["collectionName"],
+                        "artist": album.get("artistName", ""),
+                        "year": (
+                            album.get("releaseDate", "")[:4]
+                            if album.get("releaseDate")
+                            else None
+                        ),
                     },
-                    album_match_confidence=confidence
+                    album_match_confidence=confidence,
                 )
 
         # If no good match but we have albums, return the first one as artist_match_only
@@ -526,16 +572,20 @@ class ITunesRetriever:
                 success=True,
                 cover_url=self._get_best_cover_url(album),
                 release_info={
-                    'title': album['collectionName'],
-                    'artist': album.get('artistName', ''),
-                    'year': album.get('releaseDate', '')[:4] if album.get('releaseDate') else None
+                    "title": album["collectionName"],
+                    "artist": album.get("artistName", ""),
+                    "year": album.get("releaseDate", "")[:4]
+                    if album.get("releaseDate")
+                    else None,
                 },
-                album_match_confidence="artist_match_only"
+                album_match_confidence="artist_match_only",
             )
 
         return CoverResult(success=False)
 
-    def _search_albums(self, artist: str, album: str, limit: int = 10) -> List[Dict]:
+    def _search_albums(
+        self, artist: str, album: str, limit: int = 10
+    ) -> List[Dict[str, Any]]:
         """Search for albums on iTunes."""
         if album:
             term = f"{artist} {album}"
@@ -544,49 +594,50 @@ class ITunesRetriever:
             term = artist
             entity = "album"
 
-        params = {
-            'term': term,
-            'entity': entity,
-            'limit': limit,
-            'country': 'us'
-        }
+        params = {"term": term, "entity": entity, "limit": limit, "country": "us"}
 
         try:
-            response = self.session.get(self.BASE_URL, params=params)
+            response = self.session.get(
+                self.BASE_URL, params=params, timeout=COVER_REQUEST_TIMEOUT
+            )
             response.raise_for_status()
             data = response.json()
-            return data.get('results', [])
+            return _dictionary_list(data.get("results"))
         except Exception:
             return []
 
-    def _search_tracks(self, artist: str, title: str) -> List[Dict]:
+    def _search_tracks(self, artist: str, title: str) -> List[Dict[str, Any]]:
         """Search for tracks on iTunes."""
         term = f"{artist} {title}".strip()
         params = {
-            'term': term,
-            'entity': 'song',
-            'limit': DEFAULT_SEARCH_LIMIT,
-            'country': 'us'
+            "term": term,
+            "entity": "song",
+            "limit": DEFAULT_SEARCH_LIMIT,
+            "country": "us",
         }
 
         try:
-            response = self.session.get(self.BASE_URL, params=params)
+            response = self.session.get(
+                self.BASE_URL, params=params, timeout=COVER_REQUEST_TIMEOUT
+            )
             response.raise_for_status()
             data = response.json()
-            return data.get('results', [])
+            return _dictionary_list(data.get("results"))
         except Exception:
             return []
 
-    def _get_best_cover_url(self, album: Dict) -> str:
+    def _get_best_cover_url(self, album: Dict[str, Any]) -> str:
         """Get the best cover URL from album data."""
         # iTunes provides small images by default, try to get larger versions
-        artwork_url = album.get(f'artworkUrl{ITUNES_SMALL_IMAGE_SIZE}', '')
+        artwork_url = album.get(f"artworkUrl{ITUNES_SMALL_IMAGE_SIZE}", "")
+        if not isinstance(artwork_url, str):
+            return ""
         if artwork_url:
             # Try to get larger version
-            old_size = f'{ITUNES_SMALL_IMAGE_SIZE}x{ITUNES_SMALL_IMAGE_SIZE}'
-            new_size = f'{ITUNES_LARGE_IMAGE_SIZE}x{ITUNES_LARGE_IMAGE_SIZE}'
+            old_size = f"{ITUNES_SMALL_IMAGE_SIZE}x{ITUNES_SMALL_IMAGE_SIZE}"
+            new_size = f"{ITUNES_LARGE_IMAGE_SIZE}x{ITUNES_LARGE_IMAGE_SIZE}"
             artwork_url = artwork_url.replace(old_size, new_size)
-        return artwork_url
+        return str(artwork_url)
 
 
 __all__ = ["AlbumCoverRetriever", "CoverResult", "AlbumMatcher"]

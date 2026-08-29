@@ -11,10 +11,10 @@ import click
 
 from .app import YouTubeToMp3App
 from .config import AppConfig, load_config
+from .downloader import DownloadJob
 from .logging_setup import configure_logging
-from .pipeline import DownloadPipeline
+from .pipeline import DownloadPipeline, ExtractionResult
 from .utils.validation import URLValidator
-
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ def _load_app_config(
     return load_config(explicit_path=explicit, overrides=overrides)
 
 
-def _print_extraction_summary(extraction, config: AppConfig) -> None:
+def _print_extraction_summary(extraction: ExtractionResult, config: AppConfig) -> None:
     click.echo("Detected tracks:")
     for idx, track in enumerate(extraction.tracks, start=1):
         prefix = f"{idx}. " if extraction.is_playlist else ""
@@ -40,14 +40,14 @@ def _print_extraction_summary(extraction, config: AppConfig) -> None:
     click.echo(f"Output directory: {config.output_directory}")
 
 
-def _console_progress(index: int, total: int, job) -> None:
+def _console_progress(index: int, total: int, job: DownloadJob) -> None:
     click.echo(f"[{index}/{total}] {job.metadata.artist} - {job.metadata.title}")
 
 
 def _run_non_interactive(url: str, config: AppConfig) -> None:
-    if not URLValidator.is_valid_youtube_url(url):
+    if not URLValidator.is_valid_url(url):
         raise click.BadParameter(
-            "Please provide a valid YouTube video or playlist URL."
+            "Provide a valid YouTube or SoundCloud track or playlist URL."
         )
 
     pipeline = DownloadPipeline(config)
@@ -106,7 +106,7 @@ def main(
     output_dir: Optional[Path] = None,
     debug: bool = False,
 ) -> None:
-    """YouTube to MP3 Converter."""
+    """Download YouTube or SoundCloud audio as tagged MP3 files."""
 
     log_file = configure_logging(debug=debug)
     logger.info("Starting youtube-to-mp3")

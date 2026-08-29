@@ -10,7 +10,7 @@ from typing import Dict, List, Optional
 from .album_cover_retriever import CoverResult
 from .config import AppConfig
 from .downloader import AudioDownloader, DownloadJob, ProgressCallback
-from .extractor import PlaylistInfo, TrackMetadata, YouTubeExtractor
+from .extractor import MediaExtractor, PlaylistInfo, TrackMetadata
 from .metadata import MetadataCleaner
 from .utils.filesystem import sanitize_filename
 
@@ -26,11 +26,10 @@ class ExtractionResult:
     playlist_url: Optional[str] = None
 
 
-@dataclass
 class AlbumCoverCache:
     """Cache for album covers to avoid duplicate API calls."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._cache: Dict[str, CoverResult] = {}
 
     def get_cover(self, artist: str, album: str) -> Optional[CoverResult]:
@@ -66,11 +65,11 @@ class DownloadPipeline:
     def __init__(
         self,
         config: AppConfig,
-        extractor: Optional[YouTubeExtractor] = None,
+        extractor: Optional[MediaExtractor] = None,
         downloader: Optional[AudioDownloader] = None,
     ) -> None:
         self.config = config
-        self.extractor = extractor or YouTubeExtractor()
+        self.extractor = extractor or MediaExtractor()
         self.downloader = downloader or AudioDownloader(
             rate_limit_delay=config.rate_limit_delay,
             audio_quality=config.audio_quality,
@@ -79,7 +78,7 @@ class DownloadPipeline:
         self.cover_cache = AlbumCoverCache()
 
     def extract(self, url: str) -> ExtractionResult:
-        """Extract metadata for a YouTube URL."""
+        """Extract metadata for a supported media URL."""
         info = self.extractor.extract_metadata(url)
 
         if isinstance(info, PlaylistInfo):
@@ -156,7 +155,9 @@ class DownloadPipeline:
                 if progress_callback:
                     progress_callback(index, total, job)
 
-                download_result = self.downloader.download_track_with_cache(job, self.cover_cache)
+                download_result = self.downloader.download_track_with_cache(
+                    job, self.cover_cache
+                )
 
                 if progress_callback:
                     progress_callback(index, total, job)
@@ -170,7 +171,9 @@ class DownloadPipeline:
                         cover_success=cover_result.success if cover_result else False,
                         cover_source=cover_result.source if cover_result else None,
                         cover_confidence=(
-                            cover_result.album_match_confidence if cover_result else None
+                            cover_result.album_match_confidence
+                            if cover_result
+                            else None
                         ),
                     )
                 )
@@ -190,19 +193,22 @@ class DownloadPipeline:
                 # Only cache if we don't already have this combination
                 key = (metadata.artist, metadata.album)
                 if key not in unique_albums and not self.cover_cache.get_cover(*key):
-                    unique_albums[key] = getattr(metadata, "youtube_album_cover_url", None)
+                    unique_albums[key] = metadata.source_cover_url
 
         # Retrieve covers for unique combinations
         if unique_albums:
-            def _retrieve_covers():
-                for (artist, album), yt_cover_url in unique_albums.items():
+
+            def _retrieve_covers() -> None:
+                for (artist, album), source_cover_url in unique_albums.items():
                     metadata = TrackMetadata(
                         title="Unknown Title",
                         artist=artist,
                         album=album,
-                        youtube_album_cover_url=yt_cover_url
+                        source_cover_url=source_cover_url,
                     )
-                    cover_result = self.downloader.cover_retriever.retrieve_cover(metadata)
+                    cover_result = self.downloader.cover_retriever.retrieve_cover(
+                        metadata
+                    )
                     self.cover_cache.set_cover(artist, album, cover_result)
 
             await asyncio.to_thread(_retrieve_covers)

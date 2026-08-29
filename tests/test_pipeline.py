@@ -51,7 +51,9 @@ class FakeDownloader:
         self.downloaded.append(job)
         return DownloadResult(success=True)
 
-    def download_track_with_cache(self, job: DownloadJob, cover_cache=None) -> DownloadResult:
+    def download_track_with_cache(
+        self, job: DownloadJob, cover_cache=None
+    ) -> DownloadResult:
         return self.download_track(job)
 
 

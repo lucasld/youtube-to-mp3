@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from typing import List, Sequence, TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, List, Sequence, cast
 
+from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.screen import Screen
 from textual.widgets import Log, ProgressBar, Static
@@ -24,13 +25,15 @@ class DownloadProgressScreen(Screen[List[DownloadOutcome]]):
         self.jobs = list(jobs)
         self.headline = headline
         if len(self.jobs) == 1:
-            self.progress = ProgressBar(total=None, show_percentage=False, show_eta=False)
+            self.progress = ProgressBar(
+                total=None, show_percentage=False, show_eta=False
+            )
         else:
             self.progress = ProgressBar(total=len(self.jobs))
         self.log_widget = Log()
         self._completed = 0
 
-    def compose(self):
+    def compose(self) -> ComposeResult:
         with Vertical(id="progress-container"):
             yield Static(self.headline, id="progress-title")
             yield self.progress

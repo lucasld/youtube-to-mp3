@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from typing import List
+from pathlib import Path
+from typing import TYPE_CHECKING, List, cast
 
+from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
@@ -12,6 +14,9 @@ from textual.widgets import Button, Static
 
 from ..pipeline import DownloadOutcome, ExtractionResult
 from ..utils.filesystem import open_file, open_folder
+
+if TYPE_CHECKING:
+    from ..app import YouTubeToMp3App
 
 
 class DownloadSummaryScreen(Screen):
@@ -27,7 +32,7 @@ class DownloadSummaryScreen(Screen):
         self,
         extraction: ExtractionResult,
         outcomes: List[DownloadOutcome],
-        output_directory,
+        output_directory: Path,
     ) -> None:
         super().__init__()
         self.extraction = extraction
@@ -36,7 +41,7 @@ class DownloadSummaryScreen(Screen):
         self.successes = [outcome for outcome in outcomes if outcome.success]
         self.failures = [outcome for outcome in outcomes if not outcome.success]
 
-    def compose(self):
+    def compose(self) -> ComposeResult:
         success_count = len(self.successes)
         failure_count = len(self.failures)
         header = "Playlist" if self.extraction.is_playlist else "Track"
@@ -97,14 +102,14 @@ class DownloadSummaryScreen(Screen):
             await asyncio.to_thread(open_folder, self.output_directory)
 
     async def action_new_download(self) -> None:
-        app = self.app
+        app = cast("YouTubeToMp3App", self.app)
         await app.reset_to_input()
 
     async def action_close(self) -> None:
-        app = self.app
+        app = cast("YouTubeToMp3App", self.app)
         await app.reset_to_input()
 
-    def _format_cover_status(self, outcome) -> str:
+    def _format_cover_status(self, outcome: DownloadOutcome) -> str:
         """Format album cover status for display."""
         if outcome.cover_success:
             source = outcome.cover_source or "unknown"

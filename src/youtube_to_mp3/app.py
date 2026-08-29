@@ -1,4 +1,4 @@
-"""Main Textual application for YouTube to MP3 converter."""
+"""Main Textual application for media-to-MP3 downloads."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Callable, List, Optional
 
 from textual.app import App, ComposeResult
-from textual.screen import Screen
 from textual.widgets import Footer, Header
 
 from .config import AppConfig, load_config
@@ -20,7 +19,7 @@ from .ui.url_input_screen import URLInputScreen
 
 
 class YouTubeToMp3App(App):
-    """Main Textual application for YouTube to MP3 conversion."""
+    """Main Textual application for YouTube and SoundCloud downloads."""
 
     CSS = """
     Screen {
@@ -38,8 +37,8 @@ class YouTubeToMp3App(App):
     }
     """
 
-    TITLE = "YouTube to MP3 Converter"
-    SUB_TITLE = "Transform YouTube content into properly tagged MP3 files"
+    TITLE = "YouTube & SoundCloud to MP3"
+    SUB_TITLE = "Download audio as properly tagged MP3 files"
 
     def __init__(self, config: Optional[AppConfig] = None):
         super().__init__()
@@ -95,9 +94,7 @@ class YouTubeToMp3App(App):
 
         await self.push_screen(DownloadProgressScreen(jobs, headline))
 
-    async def handle_download_complete(
-        self, outcomes: List[DownloadOutcome]
-    ) -> None:
+    async def handle_download_complete(self, outcomes: List[DownloadOutcome]) -> None:
         """Show the download summary once progress completes."""
         extraction = self._current_extraction
         output_dir = self._last_output_directory or self.config.output_directory
@@ -134,9 +131,6 @@ class YouTubeToMp3App(App):
     def ensure_output_directory(self) -> None:
         """Ensure the output directory exists."""
         self.config.ensure_output_directory()
-
-    async def on_screen_dismissed(self, event: Screen.Dismissed) -> None:
-        await super().on_screen_dismissed(event)
 
 
 __all__ = ["YouTubeToMp3App"]

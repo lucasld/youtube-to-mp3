@@ -136,19 +136,19 @@ def _open_folder_with_file_selection_linux(folder_path: Path, file_path: Path) -
     # Try different file managers that support selection
     file_managers = [
         ("nautilus", ["nautilus", "--select", str(file_path)]),  # GNOME Files
-        ("dolphin", ["dolphin", "--select", str(file_path)]),     # KDE Dolphin
-        ("thunar", ["thunar", str(folder_path)]),                 # XFCE Thunar (no select support)
-        ("nemo", ["nemo", "--no-desktop", str(folder_path)]),     # Cinnamon Nemo (limited support)
+        ("dolphin", ["dolphin", "--select", str(file_path)]),  # KDE Dolphin
+        ("thunar", ["thunar", str(folder_path)]),  # XFCE Thunar (no select support)
+        (
+            "nemo",
+            ["nemo", "--no-desktop", str(folder_path)],
+        ),  # Cinnamon Nemo (limited support)
     ]
 
     for manager_cmd, args in file_managers:
         try:
             # Check if the file manager is available
             result = subprocess.run(
-                ["which", manager_cmd],
-                capture_output=True,
-                text=True,
-                check=False
+                ["which", manager_cmd], capture_output=True, text=True, check=False
             )
             if result.returncode == 0:
                 subprocess.run(args, check=False)

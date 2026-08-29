@@ -1,16 +1,18 @@
-"""YouTube metadata extraction functionality."""
+"""Metadata extraction for supported media services."""
 
 from __future__ import annotations
 
+import json
 import logging
 import re
-import json
-import requests
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
+import requests
 import yt_dlp
+from yt_dlp.utils import DownloadError
 
+from .utils.validation import MediaSource, URLValidator
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +32,8 @@ class TrackMetadata:
     source_url: Optional[str] = None
     selected: bool = True
     thumbnail_url: Optional[str] = None
-    youtube_album_cover_url: Optional[str] = None
+    source_cover_url: Optional[str] = None
+    source: Optional[str] = None
     original_title: Optional[str] = None
     extra: Dict[str, Any] = field(default_factory=dict)
 
@@ -46,10 +49,14 @@ class PlaylistInfo:
     total_tracks: int = 0
 
 
-class YouTubeExtractor:
-    """Extracts metadata from YouTube URLs using yt-dlp and direct scraping."""
+class ExtractionError(RuntimeError):
+    """Raised when a media service cannot provide usable metadata."""
 
-    def __init__(self):
+
+class MediaExtractor:
+    """Extract metadata through yt-dlp with optional provider enrichment."""
+
+    def __init__(self) -> None:
         self._ydl_opts = {
             "quiet": True,
             "no_warnings": True,
@@ -66,26 +73,32 @@ class YouTubeExtractor:
 
     def extract_metadata(self, url: str) -> Union[TrackMetadata, PlaylistInfo]:
         """
-        Extract metadata from a YouTube URL.
+        Extract metadata from a supported media URL.
 
         Returns TrackMetadata for single videos, PlaylistInfo for playlists.
         """
         try:
             with yt_dlp.YoutubeDL(self._ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
+                if not isinstance(info, dict):
+                    raise ExtractionError("The media service returned no metadata.")
 
-                # Check if it's a playlist
                 if "entries" in info:
                     return self._extract_playlist_info(info)
-                else:
-                    return self._extract_track_metadata(info)
+                return self._extract_track_metadata(info)
 
-        except Exception as e:
-            logger.warning("Metadata extraction failed for %s: %s", url, e)
-            # Fallback: try to extract basic info from URL patterns
-            return self._fallback_metadata_extraction(url, str(e))
+        except ExtractionError:
+            raise
+        except DownloadError as exc:
+            logger.warning("Metadata extraction failed for %s: %s", url, exc)
+            raise ExtractionError(self._format_extraction_error(exc)) from exc
+        except Exception as exc:
+            logger.exception("Unexpected metadata extraction failure for %s", url)
+            raise ExtractionError(f"Could not extract metadata: {exc}") from exc
 
-    def _get_structured_metadata(self, url: str) -> Optional[Dict[str, str]]:
+    def _get_youtube_structured_metadata(
+        self, url: str
+    ) -> Optional[Dict[str, Optional[str]]]:
         """
         Extract "Golden Truth" music metadata from YouTube's ytInitialData.
         This captures the "Music in this video" section.
@@ -137,7 +150,7 @@ class YouTubeExtractor:
                         vm = card.get("videoAttributeViewModel")
                         if vm:
                             # Extract basic fields
-                            result = {
+                            result: Dict[str, Optional[str]] = {
                                 "title": vm.get("title"),
                                 "artist": vm.get("subtitle"),
                                 "album": None,
@@ -204,60 +217,61 @@ class YouTubeExtractor:
         return current
 
     def _extract_track_metadata(self, info: Dict[str, Any]) -> TrackMetadata:
-        """Extract metadata from a single video info dict."""
-        title = info.get("title", "Unknown Title")
-        uploader = info.get("uploader", "Unknown Artist")
+        """Extract provider-neutral metadata from a yt-dlp info dictionary."""
+        original_title = self._as_text(info.get("title")) or "Unknown Title"
+        reported_title = self._as_text(info.get("track"))
+        reported_artist = self._as_text(info.get("artist") or info.get("creator"))
+        uploader = self._as_text(info.get("uploader")) or "Unknown Artist"
         duration = info.get("duration")
-        source_url = info.get("webpage_url") or info.get("url")
-        thumbnail = info.get("thumbnail")
+        source_url = self._as_text(
+            info.get("webpage_url") or info.get("original_url") or info.get("url")
+        )
+        thumbnail = self._as_text(info.get("thumbnail"))
+        source = self._source_from_info(info, source_url)
 
-        # Try to get "Golden Truth" metadata from YouTube's structured description
         structured = None
-        if source_url:
-            structured = self._get_structured_metadata(source_url)
+        if source is MediaSource.YOUTUBE and source_url:
+            structured = self._get_youtube_structured_metadata(source_url)
 
-        parsed = self.parse_title(title)
+        parsed = self.parse_title(original_title)
+        title = reported_title or parsed.get("title") or original_title
+        if source is MediaSource.SOUNDCLOUD:
+            artist = reported_artist or uploader
+        else:
+            artist = reported_artist or parsed.get("artist") or uploader
 
-        # Base metadata from yt-dlp/title parsing
         metadata = TrackMetadata(
-            title=parsed.get("title", title),
-            artist=parsed.get("artist", uploader),
-            album=parsed.get("album"),
-            genre=parsed.get("genre"),
-            duration=duration,
+            title=title,
+            artist=artist,
+            album=self._as_text(info.get("album")),
+            genre=self._as_text(info.get("genre")),
+            year=self._as_year(info.get("release_year") or info.get("upload_date")),
+            track_number=self._as_int(info.get("track_number")),
+            duration=self._as_int(duration),
             source_url=source_url,
             thumbnail_url=thumbnail,
-            original_title=title,
+            source_cover_url=thumbnail if source is MediaSource.SOUNDCLOUD else None,
+            source=source.value if source else None,
+            original_title=original_title,
         )
 
-        # Apply structured metadata as priority if found
         if structured:
-            if structured.get("title"):
-                metadata.title = structured["title"]
-            if structured.get("artist"):
-                metadata.artist = structured["artist"]
-            if structured.get("album"):
-                metadata.album = structured["album"]
-            if structured.get("album_cover_url"):
-                metadata.youtube_album_cover_url = structured["album_cover_url"]
-
-        if info.get("release_year") and not metadata.year:
-            metadata.year = info.get("release_year")
-
-        if info.get("track") and (metadata.title == title or not metadata.title):
-            metadata.title = info.get("track")
-
-        if info.get("artist") and (metadata.artist == uploader or not metadata.artist):
-            metadata.artist = info.get("artist")
-
-        # Use album info from extra data if available
-        if not metadata.album and info.get("album"):
-            metadata.album = info.get("album")
+            structured_title = structured.get("title")
+            structured_artist = structured.get("artist")
+            if structured_title:
+                metadata.title = structured_title
+            if structured_artist:
+                metadata.artist = structured_artist
+            metadata.album = structured.get("album") or metadata.album
+            metadata.source_cover_url = (
+                structured.get("album_cover_url") or metadata.source_cover_url
+            )
 
         metadata.extra = {
             "album": info.get("album"),
             "channel": info.get("channel"),
             "channel_url": info.get("channel_url"),
+            "extractor": info.get("extractor_key") or info.get("extractor"),
         }
 
         return metadata
@@ -267,6 +281,8 @@ class YouTubeExtractor:
         playlist_title = info.get("title", "Unknown Playlist")
         entries = [entry for entry in info.get("entries", []) if entry]
         total_entries = len(entries)
+        if not entries:
+            raise ExtractionError("The playlist does not contain downloadable tracks.")
 
         # Check if this is an album based on multiple heuristics
         is_album = self._is_album_playlist(info, entries)
@@ -381,32 +397,66 @@ class YouTubeExtractor:
 
         return clean.strip()
 
-    def _fallback_metadata_extraction(self, url: str, error: str) -> TrackMetadata:
-        """Fallback metadata extraction when yt-dlp fails."""
-        logger.info("Using fallback metadata extraction for %s due to: %s", url, error)
-        # Try to extract video ID from URL
-        video_id = self._extract_video_id(url)
-        if video_id:
-            return TrackMetadata(
-                title=f"YouTube Video {video_id}", artist="Unknown Artist"
-            )
-
-        return TrackMetadata(title="Unknown Title", artist="Unknown Artist")
-
     def _extract_video_id(self, url: str) -> Optional[str]:
-        """Extract YouTube video ID from URL."""
-        patterns = [
-            r"(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})",
-            r"youtube\.com\/embed\/([a-zA-Z0-9_-]{11})",
-            r"youtube\.com\/v\/([a-zA-Z0-9_-]{11})",
-        ]
+        """Extract a YouTube video ID for backward compatibility."""
+        return URLValidator.extract_video_id(url)
 
-        for pattern in patterns:
-            match = re.search(pattern, url)
-            if match:
-                return match.group(1)
-
+    @staticmethod
+    def _source_from_info(
+        info: Dict[str, Any], source_url: Optional[str]
+    ) -> Optional[MediaSource]:
+        extractor = str(
+            info.get("extractor_key") or info.get("extractor") or ""
+        ).lower()
+        if "soundcloud" in extractor:
+            return MediaSource.SOUNDCLOUD
+        if "youtube" in extractor:
+            return MediaSource.YOUTUBE
+        if source_url:
+            classification = URLValidator.classify(source_url)
+            if classification:
+                return classification.source
         return None
 
+    @staticmethod
+    def _as_text(value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
 
-__all__ = ["TrackMetadata", "PlaylistInfo", "YouTubeExtractor"]
+    @staticmethod
+    def _as_int(value: Any) -> Optional[int]:
+        if value is None or isinstance(value, bool):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _as_year(cls, value: Any) -> Optional[int]:
+        if isinstance(value, str) and len(value) >= 4:
+            value = value[:4]
+        year = cls._as_int(value)
+        return year if year is not None and 1900 <= year <= 2100 else None
+
+    @staticmethod
+    def _format_extraction_error(exc: DownloadError) -> str:
+        message = str(exc).removeprefix("ERROR: ").strip()
+        if "Unsupported URL" in message:
+            return "This URL is not supported by the media extractor."
+        return message or "The media service did not return usable metadata."
+
+
+# Keep the public name for callers that imported it before multi-source support.
+YouTubeExtractor = MediaExtractor
+
+
+__all__ = [
+    "ExtractionError",
+    "MediaExtractor",
+    "PlaylistInfo",
+    "TrackMetadata",
+    "YouTubeExtractor",
+]

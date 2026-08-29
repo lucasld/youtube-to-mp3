@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from .utils.filesystem import get_music_directory, ensure_directory
+from .utils.filesystem import ensure_directory, get_music_directory
 
 _DEFAULT_CONFIG_PATH = Path("~/.config/youtube-to-mp3/config.json").expanduser()
 
@@ -27,7 +27,7 @@ class AppConfig:
     """Application configuration with sensible defaults."""
 
     output_directory: Path = field(
-        default_factory=lambda: get_music_directory() / "YouTube"
+        default_factory=lambda: get_music_directory() / "Media Downloads"
     )
     audio_quality: str = "192"
     rate_limit_delay: float = 1.5

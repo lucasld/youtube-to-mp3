@@ -1,62 +1,79 @@
-# YouTube to MP3: Metadata Extraction & Matching Engine
+# YouTube and SoundCloud to MP3
 
-Technical project exploring YouTube data scraping, asynchronous processing, and fuzzy metadata matching. This codebase serves as a reference for implementing multi-tier fallback systems and complex data extraction.
+Download a YouTube video, YouTube playlist, SoundCloud track, or SoundCloud set as tagged MP3 files. Paste the link into one input. The application detects the media service from the URL.
 
 <p align="center">
-  <img src="assets/ui.png" alt="YouTube to MP3 UI" width="600">
+  <img src="assets/ui.png" alt="URL input screen" width="600">
 </p>
 
-## Getting Started
+## Requirements
 
-1. Clone the repository and install dependencies:
+- Python 3.10 or newer
+- `ffmpeg` and `ffprobe` on `PATH`
+
+`yt-dlp` uses FFmpeg to convert downloaded audio to MP3. Install the FFmpeg binaries through your system package manager. The Python package named `ffmpeg` is not a substitute.
+
+## Install and run
+
+Install the application in editable mode:
+
 ```bash
-pip install -e "."
+python -m pip install -e "."
 ```
 
-2. To run the system in interactive mode:
+Open the interactive interface:
+
 ```bash
-youtube-to-mp3
+ytmp3
 ```
 
-3. To process a specific URL directly:
+`youtube-to-mp3` remains available as the longer command name.
+
+You can also download a URL without opening the interface:
+
 ```bash
-youtube-to-mp3 [URL]
+ytmp3 "https://soundcloud.com/artist/track"
 ```
 
-### Options
-- `--output-dir PATH`: Specify where the downloaded files should be saved.
-- `--config PATH`: Path to a custom configuration file.
-- `--debug`: Enable verbose rotating file logs for troubleshooting.
+The command accepts these options:
 
-### Logs
+- `--output-dir PATH` sets the download directory.
+- `--config PATH` loads a specific configuration file.
+- `--debug` writes detailed information to the rotating log file.
+
+The default output directory is `Media Downloads` inside your music directory.
+
+## How downloads work
+
+The application validates YouTube and SoundCloud URLs locally, then asks `yt-dlp` for track or playlist metadata. Common fields such as the title, artist, album, year, duration, and artwork use the same internal model for both services. YouTube's "Music in this video" data provides extra metadata when it is available.
+
+Before a download starts, you can edit the extracted metadata and choose tracks from a playlist. The downloader converts the best available audio to MP3, writes ID3 tags, and retrieves missing artwork from MusicBrainz or iTunes. Existing files are not overwritten.
+
+## Development checks
+
+Install the development dependencies:
+
+```bash
+python -m pip install -e ".[dev]"
+```
+
+Run the checks:
+
+```bash
+pytest
+ruff format --check src tests
+ruff check src tests
+mypy src
+```
+
+## Logs
+
 - macOS: `~/Library/Logs/youtube-to-mp3/youtube-to-mp3.log`
 - Linux: `~/.local/state/youtube-to-mp3/logs/youtube-to-mp3.log`
 - Windows: `~/AppData/Local/youtube-to-mp3/logs/youtube-to-mp3.log`
 
-Logs are rotated automatically (`~2MB` per file, up to 5 backups).
+Each log file grows to about 2 MB before rotation. The application keeps five backups.
 
-## Technical Architecture
-The system is designed with a clean separation of concerns, utilizing an asynchronous pipeline to coordinate extraction, downloading, and tagging.
+## Usage note
 
-### Multi-Tier Metadata Retrieval
-The core of the project implements a robust waterfall strategy:
-- **YouTube Structured Data**: Traverses `ytInitialData` to extract music claims directly from the source.
-- **Async API Fallbacks**: If structured data is missing, the system queries:
-    - **MusicBrainz**: Release and recording-level fuzzy searches.
-    - **iTunes**: Tertiary fallback for artwork and verified metadata.
-- **Fuzzy Matching**: A custom matching system utilizes word-overlap ratios and name normalization to ensure accuracy.
-
-### Performance & Efficiency
-- **Asynchronous Pipeline**: Uses `asyncio` to manage non-blocking operations.
-- **Connection Pooling**: Implements `requests.Session` for persistent connections.
-- **Intelligent Caching**: Centralized cache prevents redundant external API lookups.
-
-## Libraries
-- **yt-dlp**: YouTube data extraction.
-- **mutagen**: ID3v2 tag manipulation and cover art embedding.
-- **textual**: Reactive CLI/TUI experience.
-- **asyncio**: High-concurrency network tasks.
-- **requests**: HTTP communication and session management.
-
-## Disclaimer
-This project is for educational purposes only. It is not intended to be used, distributed, or commercialized. The developer does not support or encourage the use of this software to violate the Terms of Service of any third-party platform. All responsibility for any actions taken using the concepts or code within this repository resides solely with the individual user. This software is provided as is without warranty of any kind.
+Download only media that you own or have permission to save. Media services can change their pages and access rules, so keep `yt-dlp` current when extraction stops working.

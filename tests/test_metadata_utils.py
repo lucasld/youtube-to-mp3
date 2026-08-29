@@ -3,7 +3,7 @@
 from youtube_to_mp3.album_cover_retriever import AlbumMatcher
 from youtube_to_mp3.extractor import TrackMetadata
 from youtube_to_mp3.metadata import MetadataCleaner, MetadataFormatter
-from youtube_to_mp3.utils.validation import URLValidator
+from youtube_to_mp3.utils.validation import MediaKind, MediaSource, URLValidator
 
 
 def test_metadata_cleaner_applies_defaults():
@@ -57,6 +57,35 @@ def test_url_validator_classifies_urls():
     assert URLValidator.classify_url(invalid_url)[0] == "invalid"
 
 
+def test_url_validator_classifies_soundcloud_tracks_and_sets():
+    track = URLValidator.classify(
+        "https://soundcloud.com/example-artist/example-track?utm_source=clipboard"
+    )
+    playlist = URLValidator.classify(
+        "https://soundcloud.com/example-artist/sets/example-playlist"
+    )
+
+    assert track is not None
+    assert track.source is MediaSource.SOUNDCLOUD
+    assert track.kind is MediaKind.TRACK
+    assert track.media_id == "example-artist/example-track"
+    assert playlist is not None
+    assert playlist.source is MediaSource.SOUNDCLOUD
+    assert playlist.kind is MediaKind.COLLECTION
+    assert URLValidator.is_valid_url("soundcloud.com/example-artist/example-track")
+
+
+def test_url_validator_rejects_profiles_and_lookalike_hosts():
+    assert not URLValidator.is_valid_url("https://soundcloud.com/example-artist")
+    assert not URLValidator.is_valid_url("https://on.soundcloud.com")
+    assert not URLValidator.is_valid_url(
+        "https://soundcloud.com.example.test/artist/track"
+    )
+    assert not URLValidator.is_valid_url(
+        "https://youtube.com.example.test/watch?v=dQw4w9WgXcQ"
+    )
+
+
 def test_album_matcher_normalize_album_name():
     """Test album name normalization."""
     # Test basic normalization
@@ -69,7 +98,10 @@ def test_album_matcher_normalize_album_name():
     assert AlbumMatcher.normalize_album_name("Album Name [Remastered]") == "Album Name"
 
     # Test combined
-    assert AlbumMatcher.normalize_album_name("  Album Name (Deluxe) [Remastered]  ") == "Album Name"
+    assert (
+        AlbumMatcher.normalize_album_name("  Album Name (Deluxe) [Remastered]  ")
+        == "Album Name"
+    )
 
 
 def test_album_matcher_album_names_match():
@@ -78,14 +110,26 @@ def test_album_matcher_album_names_match():
     assert AlbumMatcher.album_names_match("Album Name", "Album Name") == (True, "exact")
 
     # Partial match
-    assert AlbumMatcher.album_names_match("Album Name Deluxe", "Album Name") == (True, "partial")
-    assert AlbumMatcher.album_names_match("Album Name", "Album Name Deluxe") == (True, "partial")
+    assert AlbumMatcher.album_names_match("Album Name Deluxe", "Album Name") == (
+        True,
+        "partial",
+    )
+    assert AlbumMatcher.album_names_match("Album Name", "Album Name Deluxe") == (
+        True,
+        "partial",
+    )
 
     # Word overlap (should work with default threshold)
-    assert AlbumMatcher.album_names_match("Album One Two", "Album Two Three") == (True, "word_overlap")
+    assert AlbumMatcher.album_names_match("Album One Two", "Album Two Three") == (
+        True,
+        "word_overlap",
+    )
 
     # No match
-    assert AlbumMatcher.album_names_match("Completely Different", "Album Name") == (False, "no_match")
+    assert AlbumMatcher.album_names_match("Completely Different", "Album Name") == (
+        False,
+        "no_match",
+    )
 
     # No album expected
     assert AlbumMatcher.album_names_match("Any Name", "") == (True, "no_album_expected")

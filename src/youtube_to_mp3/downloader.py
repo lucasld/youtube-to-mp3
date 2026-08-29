@@ -6,15 +6,15 @@ import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, cast
 
 import yt_dlp
-from yt_dlp.utils import DownloadError
-from mutagen.id3 import ID3, TALB, TCON, TIT2, TPE1, TRCK, TYER, APIC
+from mutagen.id3 import APIC, ID3, TALB, TCON, TIT2, TPE1, TRCK, TYER
 from mutagen.mp3 import MP3
+from yt_dlp.utils import DownloadError
 
-from .extractor import TrackMetadata
 from .album_cover_retriever import AlbumCoverRetriever, CoverResult
+from .extractor import TrackMetadata
 from .utils.filesystem import sanitize_filename
 
 if TYPE_CHECKING:
@@ -129,14 +129,18 @@ class AudioDownloader:
             "no_warnings": False,
             "noprogress": True,
             "noplaylist": True,
-            "overwrites": True,
+            "overwrites": False,
+            "continuedl": False,
         }
 
     def _format_download_error(self, exc: DownloadError) -> str:
         """Return a user-facing error message for yt-dlp download failures."""
         message = str(exc)
         if "HTTP Error 403" in message:
-            return "HTTP Error 403: Forbidden (YouTube rejected this stream; retry or update yt-dlp)"
+            return (
+                "HTTP Error 403: the media service rejected the stream. "
+                "Retry or update yt-dlp."
+            )
         return message
 
     def _embed_metadata_with_cache(
@@ -153,24 +157,25 @@ class AudioDownloader:
 
             if audio.tags is None:
                 audio.add_tags()
+            tags = cast(ID3, audio.tags)
 
             # Embed basic metadata
-            audio.tags.add(TIT2(text=metadata.title))
-            audio.tags.add(TPE1(text=metadata.artist))
+            tags.add(TIT2(text=metadata.title))
+            tags.add(TPE1(text=metadata.artist))
 
             if metadata.album:
-                audio.tags.add(TALB(text=metadata.album))
+                tags.add(TALB(text=metadata.album))
             if metadata.genre:
-                audio.tags.add(TCON(text=metadata.genre))
+                tags.add(TCON(text=metadata.genre))
             if metadata.year:
-                audio.tags.add(TYER(text=str(metadata.year)))
+                tags.add(TYER(text=str(metadata.year)))
             if metadata.track_number and metadata.total_tracks:
                 track_info = f"{metadata.track_number}/{metadata.total_tracks}"
-                audio.tags.add(TRCK(text=track_info))
+                tags.add(TRCK(text=track_info))
 
             # Retrieve and embed album cover
             cover_result = self._embed_album_cover_with_cache(
-                audio, metadata, cover_cache
+                tags, metadata, cover_cache
             )
 
             audio.save()
@@ -182,7 +187,7 @@ class AudioDownloader:
 
     def _embed_album_cover_with_cache(
         self,
-        audio: MP3,
+        tags: ID3,
         metadata: TrackMetadata,
         cover_cache: Optional["AlbumCoverCache"],
     ) -> CoverResult:
@@ -206,7 +211,7 @@ class AudioDownloader:
                 mime_type = self._guess_mime_type(cover_result.cover_data)
 
                 # Remove any existing APIC frames to avoid duplicates
-                audio.tags.delall("APIC")
+                tags.delall("APIC")
 
                 # Add the cover art
                 apic = APIC(
@@ -216,18 +221,18 @@ class AudioDownloader:
                     desc="Cover",
                     data=cover_result.cover_data,
                 )
-                audio.tags.add(apic)
+                tags.add(apic)
 
                 source = cover_result.source or "unknown"
                 confidence = cover_result.album_match_confidence
-                logger.info(f"Embedded album cover from {source} ({confidence})")
+                logger.info("Embedded album cover from %s (%s)", source, confidence)
             else:
-                logger.info(f"No album cover found for '{metadata.album}'")
+                logger.info("No album cover found for %r", metadata.album)
 
             return cover_result
 
         except Exception as exc:  # pragma: no cover - best effort cover embedding
-            logger.warning(f"Could not embed album cover: {exc}")
+            logger.warning("Could not embed album cover: %s", exc)
             return CoverResult(
                 success=False,
                 error=f"Cover embedding failed: {str(exc)}",
@@ -255,7 +260,7 @@ class AudioDownloader:
         return "image/jpeg"
 
     def _apply_rate_limit(self) -> None:
-        """Apply rate limiting to avoid YouTube bot detection."""
+        """Space consecutive media-service requests."""
         current_time = time.time()
         time_since_last = current_time - self._last_request_time
 

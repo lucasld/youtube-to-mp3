@@ -1,9 +1,10 @@
-"""URL input screen for the YouTube to MP3 converter."""
+"""URL input screen for supported media services."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
+from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Center, Horizontal, Vertical
 from textual.screen import Screen
@@ -16,7 +17,7 @@ if TYPE_CHECKING:  # pragma: no cover - type checking only
 
 
 class URLInputScreen(Screen):
-    """Screen for entering YouTube URLs."""
+    """Screen for entering YouTube and SoundCloud URLs."""
 
     BINDINGS = [Binding("escape", "quit", "Quit", show=False)]
 
@@ -45,19 +46,19 @@ class URLInputScreen(Screen):
     }
     """
 
-    def compose(self):
+    def compose(self) -> ComposeResult:
         with Vertical():
             with Center():
-                yield Static("YouTube to MP3 Converter", id="title")
+                yield Static("YouTube & SoundCloud to MP3", id="title")
                 yield Static(
-                    "Paste a YouTube video or playlist URL below.\n"
+                    "Paste a YouTube or SoundCloud link below.\n"
                     "Press Enter or click Continue to proceed.",
                     id="instructions",
                 )
 
             with Center():
                 yield Input(
-                    placeholder="https://youtu.be/... or https://www.youtube.com/...",
+                    placeholder="https://youtu.be/... or https://soundcloud.com/...",
                     id="url-input",
                 )
 
@@ -100,9 +101,10 @@ class URLInputScreen(Screen):
             self.notify("Please enter a URL.", severity="warning")
             return
 
-        if not URLValidator.is_valid_youtube_url(url):
+        if not URLValidator.is_valid_url(url):
             self.notify(
-                "That does not look like a valid YouTube URL.", severity="error"
+                "Enter a valid YouTube or SoundCloud track or playlist URL.",
+                severity="error",
             )
             return
 

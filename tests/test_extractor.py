@@ -1,7 +1,15 @@
 """Tests for the YouTube extractor module."""
 
 import pytest
-from youtube_to_mp3.extractor import YouTubeExtractor, TrackMetadata, PlaylistInfo
+from yt_dlp.utils import DownloadError
+
+from youtube_to_mp3.extractor import (
+    ExtractionError,
+    MediaExtractor,
+    PlaylistInfo,
+    TrackMetadata,
+    YouTubeExtractor,
+)
 
 
 class TestYouTubeExtractor:
@@ -95,6 +103,56 @@ class TestTrackMetadata:
         assert metadata.track_number is None
         assert metadata.total_tracks is None
         assert metadata.duration is None
+
+
+def test_soundcloud_metadata_uses_provider_fields_without_youtube_scraping(monkeypatch):
+    extractor = MediaExtractor()
+
+    def unexpected_request(url: str):
+        raise AssertionError(f"YouTube enrichment requested for {url}")
+
+    monkeypatch.setattr(
+        extractor, "_get_youtube_structured_metadata", unexpected_request
+    )
+    metadata = extractor._extract_track_metadata(
+        {
+            "title": "Raw SoundCloud title",
+            "track": "Track title",
+            "artist": "Track artist",
+            "album": "Track album",
+            "release_year": 2024,
+            "duration": 183,
+            "webpage_url": "https://soundcloud.com/track-artist/track-title",
+            "thumbnail": "https://i1.sndcdn.com/artworks-example-large.jpg",
+            "extractor_key": "Soundcloud",
+        }
+    )
+
+    assert metadata.title == "Track title"
+    assert metadata.artist == "Track artist"
+    assert metadata.album == "Track album"
+    assert metadata.source == "soundcloud"
+    assert metadata.source_cover_url == metadata.thumbnail_url
+
+
+def test_extraction_errors_do_not_return_fake_metadata(monkeypatch):
+    class FailingYoutubeDL:
+        def __init__(self, options):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def extract_info(self, url: str, download: bool):
+            raise DownloadError("media is unavailable")
+
+    monkeypatch.setattr("youtube_to_mp3.extractor.yt_dlp.YoutubeDL", FailingYoutubeDL)
+
+    with pytest.raises(ExtractionError, match="media is unavailable"):
+        MediaExtractor().extract_metadata("https://soundcloud.com/artist/track")
 
 
 class TestPlaylistInfo:

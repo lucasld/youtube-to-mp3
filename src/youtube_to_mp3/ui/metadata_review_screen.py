@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import List, Optional, TYPE_CHECKING, Callable, cast
+from typing import TYPE_CHECKING, Callable, List, Optional, TypedDict, cast
 
 from textual import events
+from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import Button, DataTable, Input, Static
 
+from ..extractor import TrackMetadata
 from ..metadata import MetadataCleaner
 from ..pipeline import ExtractionResult
-from ..extractor import TrackMetadata
 
 if TYPE_CHECKING:  # pragma: no cover - for typing only
     from ..app import YouTubeToMp3App
@@ -25,13 +26,13 @@ class TrackEditModal(Screen):
     def __init__(
         self,
         metadata: TrackMetadata,
-        callback: Callable[[Optional[TrackMetadata]], None]
+        callback: Callable[[Optional[TrackMetadata]], None],
     ) -> None:
         super().__init__()
         self.metadata = metadata
         self.callback = callback
 
-    def compose(self):
+    def compose(self) -> ComposeResult:
         with Vertical(id="edit-container"):
             yield Static("Edit Track Metadata", id="edit-title")
             yield Input(id="title", placeholder="Title")
@@ -102,14 +103,22 @@ class TrackEditModal(Screen):
         return value or None
 
 
+class BulkEditValues(TypedDict):
+    """Values that a bulk metadata edit can replace."""
+
+    album: Optional[str]
+    genre: Optional[str]
+    year: Optional[int]
+
+
 class BulkEditModal(Screen):
     """Modal dialog for editing multiple tracks at once."""
 
-    def __init__(self, callback: Callable[[Optional[dict]], None]) -> None:
+    def __init__(self, callback: Callable[[Optional[BulkEditValues]], None]) -> None:
         super().__init__()
         self.callback = callback
 
-    def compose(self):
+    def compose(self) -> ComposeResult:
         with Vertical(id="bulk-container"):
             yield Static("Bulk Edit Metadata", id="bulk-title")
             yield Static("Leave a field blank to keep current values.")
@@ -160,7 +169,7 @@ class MetadataReviewScreen(Screen):
         self.extraction = extraction
         self.table: DataTable = DataTable(zebra_stripes=True)
 
-    def compose(self):
+    def compose(self) -> ComposeResult:
         with Vertical(id="metadata-container"):
             title = "Playlist" if self.extraction.is_playlist else "Track"
             yield Static(f"Review {title} Metadata", id="metadata-title")
@@ -222,25 +231,17 @@ class MetadataReviewScreen(Screen):
         ):
             self.table.update_cell(row_key, column_key, value)
 
-    def _require_current_track(self) -> Optional[int]:
-        row_index = self.table.cursor_row
-        if row_index is None:
-            self.notify("Select a track first.", severity="warning")
-            return None
-        return row_index
+    def _current_track_index(self) -> int:
+        return self.table.cursor_row
 
     async def action_toggle_select(self) -> None:
-        row_index = self._require_current_track()
-        if row_index is None:
-            return
+        row_index = self._current_track_index()
         track = self.extraction.tracks[row_index]
         track.selected = not track.selected
         self._refresh_row(row_index)
 
     async def action_edit_track(self) -> None:
-        row_index = self._require_current_track()
-        if row_index is None:
-            return
+        row_index = self._current_track_index()
 
         track = self.extraction.tracks[row_index]
 
@@ -262,7 +263,7 @@ class MetadataReviewScreen(Screen):
             )
             return
 
-        def bulk_callback(result: Optional[dict]) -> None:
+        def bulk_callback(result: Optional[BulkEditValues]) -> None:
             if not result:
                 return
             for idx in selected_indexes:
